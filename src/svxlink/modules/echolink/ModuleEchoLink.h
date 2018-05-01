@@ -61,6 +61,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 #include "version/SVXLINK.h"
 
+#include "BrandMeisterBridge.h"
 
 
 /****************************************************************************
@@ -154,6 +155,7 @@ class ModuleEchoLink : public Module
 
 
   private:
+    BrandMeisterBridge bridge;
     typedef enum
     {
       STATE_NORMAL,

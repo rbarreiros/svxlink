@@ -333,6 +333,8 @@ if(USE_QT)
   add_subdirectory(qtel)
 endif(USE_QT)
 
+add_subdirectory(autopatch)
+
 # Experimental CPack package building
 set(CPACK_SET_DESTDIR "ON")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
