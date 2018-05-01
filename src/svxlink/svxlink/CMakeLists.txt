@@ -77,6 +77,12 @@ set(LIBS ${LIBS} ${JSONCPP_LIBRARIES})
 # Add project libraries
 set(LIBS trx locationinfo asynccpp asyncaudio asynccore svxmisc ${LIBS})
 
+# ***
+pkg_check_modules(DBUS dbus-1)
+include_directories(${DBUS_INCLUDE_DIRS})
+set(LIBS ${LIBS} ${DBUS_LIBRARIES} autopatch)
+# ***
+
 # Build the executable
 add_executable(svxlink ${SVXLINK_SRCS} ${VERSION_DEPENDS})
 target_link_libraries(svxlink ${LIBS})
@@ -90,7 +96,7 @@ foreach(logic_name ${SVXLINK_LOGIC_CORES})
   add_library(${logic_name}Logic MODULE ${logic_name}Logic.cpp)
   set_target_properties(${logic_name}Logic PROPERTIES PREFIX "")
   set_property(TARGET ${logic_name}Logic PROPERTY NO_SONAME 1)
-  #target_link_libraries(${logic_name}Logic ${LIBS})
+  target_link_libraries(${logic_name}Logic ${LIBS})
 endforeach()
 
 # Generate config file with correct paths

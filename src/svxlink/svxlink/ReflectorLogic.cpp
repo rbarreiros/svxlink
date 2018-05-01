@@ -452,6 +452,22 @@ bool ReflectorLogic::initialize(Async::Config& cfgobj, const std::string& logic_
   cfg().getValue(name(), "UDP_HEARTBEAT_INTERVAL",
       m_udp_heartbeat_tx_cnt_reset);
 
+  string value;
+  if (cfg().getValue(name(), "BRIDGE_DEFAULT", value))
+  {
+    bridge.setDefaultConfiguration(value.c_str());
+  }
+  if (cfg().getValue(name(), "BRIDGE_ENCODING", value))
+  {
+    bridge.setEncodingConfiguration(value.c_str());
+  }
+  if (cfg().getValue(name(), "BRIDGE_PROXY", value))
+  {
+    bridge.setProxyConfiguration(value.c_str());
+  }
+
+  bridge.setCallConfiguration(m_callsign.c_str());
+
   connect();
 
   return true;
@@ -1196,6 +1212,8 @@ void ReflectorLogic::handleMsgTalkerStart(std::istream& is)
   }
   cout << name() << ": Talker start on TG #" << msg.tg() << ": "
        << msg.callsign() << endl;
+
+  bridge.setTalker(msg.callsign().c_str(), "");
 
     // Select the incoming TG if idle
   if (m_tg_select_timeout_cnt == 0)

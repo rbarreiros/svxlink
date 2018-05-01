@@ -62,6 +62,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 #include "LogicBase.h"
 
+#include "BrandMeisterBridge.h"
 
 /****************************************************************************
  *
@@ -184,6 +185,7 @@ class ReflectorLogic : public LogicBase
     virtual ~ReflectorLogic(void) override;
 
   private:
+    BrandMeisterBridge bridge;
     struct MonitorTgEntry
     {
       uint32_t    tg;
