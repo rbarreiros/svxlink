@@ -1,0 +1,17 @@
+[Unit]
+Description=SvxLink Server
+After=network.target sound.target
+
+[Service]
+Restart=always
+KillMode=process
+WorkingDirectory=/opt/SVXLink
+ExecStart=/opt/SVXLink/bin/svxlink --config=/opt/SVXLink/etc/svxlink/svxlink.conf
+RestartSec=15
+TimeoutSec=15
+User=svxlink
+Group=svxlink
+Environment="HOME=/opt/SVXLink"
+
+[Install]
+WantedBy=multi-user.target
