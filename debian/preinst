@@ -1,0 +1,5 @@
+#!/bin/bash
+
+if ! id svxlink &>/dev/null; then
+    useradd -r -M svxlink -s /bin/false -d /opt/SVXLink -G audio || true
+fi
