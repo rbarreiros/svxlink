@@ -2397,7 +2397,7 @@ void TetraLogic::handleRssi(std::string m_message)
     m_message.erase(0,6);
     int rssi = -113 + 2 * getNextVal(m_message);
     rssi_list.push_back(rssi);
-    if (rssi_list.size() > 20) rssi_list.pop_back();
+    if (rssi_list.size() > 20) rssi_list.erase(rssi_list.begin());
     if (rssi < min_rssi) min_rssi = rssi; // store min rssi value
     if (rssi > max_rssi) max_rssi = rssi; // store max rssi value
 
