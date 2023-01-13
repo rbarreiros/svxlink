@@ -201,6 +201,12 @@ class Reflector : public sigc::trackable
     void updateQsostate(Json::Value eventmessage);
 
     /**
+     * @brief  Update System information
+     * @param  event message with System information
+     */
+    void updateSysteminfostate(Json::Value eventmessage);
+
+    /**
      * @brief  Update Rssi information
      * @param  event message with rssi info
      */

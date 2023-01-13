@@ -117,6 +117,8 @@ using namespace SvxLink;
 #define WAP_MESSAGE 32
 #define LOCATION_SYSTEM_TSDU 33
 #define RSSI 34
+#define VENDOR 35
+#define MODEL 36
 
 #define DMO_OFF 7
 #define DMO_ON 8
@@ -132,7 +134,7 @@ using namespace SvxLink;
 
 #define MAX_TRIES 5
 
-#define TETRA_LOGIC_VERSION "10012023"
+#define TETRA_LOGIC_VERSION "13012023"
 
 /****************************************************************************
  *
@@ -210,7 +212,7 @@ TetraLogic::TetraLogic(void)
   dmcc(0), dissi(0), infosds(""), is_tx(false), last_sdsid(0), pei_pty_path(""),
   pei_pty(0), ai(-1), check_qos(0), qos_sds_to("0815"), qos_limit(-90),
   qosTimer(300000, Timer::TYPE_ONESHOT, false), min_rssi(100), max_rssi(100),
-  reg_cell(0), reg_la(0), reg_mni(0)
+  reg_cell(0), reg_la(0), reg_mni(0), vendor(""), model("")
 {
   peiComTimer.expired.connect(mem_fun(*this, &TetraLogic::onComTimeout));
   peiActivityTimer.expired.connect(mem_fun(*this,
@@ -729,7 +731,7 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
 
   rxValveSetOpen(true);
   setTxCtrlMode(Tx::TX_AUTO);
-  
+
   processEvent("startup");
 
   cout << ">>> Started SvxLink with special TetraLogic extension (v"
@@ -904,6 +906,7 @@ void TetraLogic::initPei(void)
     ss << "pei_init_finished";
     processEvent(ss.str());
     sendUserInfo(); // send userinfo to reflector
+    if (vendor.length() > 1) sendSystemInfo(); // send systeminfo to reflector
     peirequest = INIT_COMPLETE;
   }
 } /* TetraLogic::initPei */
@@ -1070,6 +1073,14 @@ void TetraLogic::handlePeiAnswer(std::string m_message)
 
     case REGISTRATION:
       handleCreg(m_message);
+      break;
+
+    case VENDOR:
+      handleVendor(m_message);
+      break;
+
+    case MODEL:
+      handleModel(m_message);
       break;
 
     case INVALID:
@@ -2037,6 +2048,8 @@ int TetraLogic::handleMessage(std::string mesg)
   mre["^\\+CLVL:"]                                = CLVL;
   mre["^\\+CSQ:"]                                 = RSSI;
   mre["^\\+CREG:"]                                = REGISTRATION;
+  mre["^\\+GMI:"]                                 = VENDOR;
+  mre["^\\+GMM:"]                                 = MODEL;
   mre["^01"]                                      = OTAK;
   mre["^02"]                                      = SIMPLE_TEXT_SDS;
   mre["^03"]                                      = SIMPLE_LIP_SDS;
@@ -2485,6 +2498,36 @@ void TetraLogic::handleCreg(std::string m_message)
 
   log(LOGDEBUG, ss.str());
 } /* TetraLogic::handleCreg */
+
+
+void TetraLogic::handleModel(std::string m_message)
+{
+  // +GMM: 54007,M83PF-----AN,88.2.0.0
+  m_message.erase(0,6);
+  model = getNextStr(m_message);
+} /* TetraLogic::handleModel */
+
+
+void TetraLogic::handleVendor(std::string m_message)
+{
+  // +GMI: MOTOROLA
+  m_message.erase(0,6);
+  vendor = m_message;
+} /* TetraLogic::handleVendor */
+
+
+void TetraLogic::sendSystemInfo(void)
+{
+  // prepare event systeminfo for reflector
+    Json::Value systeminfo(Json::objectValue);
+    systeminfo["vendor"] = vendor;
+    systeminfo["model"] = model;
+    systeminfo["call"] = callsign();
+    systeminfo["issi"] = issi;
+    systeminfo["message"] = "Signal:info";
+    systeminfo["tl_version"] = TETRA_LOGIC_VERSION;
+    publishInfo("System:info", systeminfo);
+} /* TetraLogic::sendSystemInfo */
 
 
 std::string TetraLogic::jsonToString(Json::Value eventmessage)

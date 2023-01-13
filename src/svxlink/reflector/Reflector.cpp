@@ -324,6 +324,12 @@ void Reflector::updateRssistate(Json::Value eventmessage)
 } /* Reflector::updateRssistate */
 
 
+void Reflector::updateSysteminfostate(Json::Value eventmessage)
+{
+  cout << jsonToString(eventmessage) << endl;
+} /* Reflector::updateSysteminfostate */
+
+
 void Reflector::nodeList(std::vector<std::string>& nodes) const
 {
   nodes.clear();

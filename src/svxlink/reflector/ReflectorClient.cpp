@@ -722,6 +722,10 @@ void ReflectorClient::handleStateEvent(std::istream& is)
   {
     m_reflector->updateRssistate(eventmessage);
   }
+  else if (msg.name() == "System:info")
+  {
+    m_reflector->updateSysteminfostate(eventmessage);
+  }
 } /* ReflectorClient::handleStateEvent */
 
 
