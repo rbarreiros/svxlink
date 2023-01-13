@@ -1377,7 +1377,7 @@ void TetraLogic::handleSdsMsg(std::string sds)
       sdsinfo["lon"] = lipinfo.longitude;
       sdsinfo["reasonforsending"] = lipinfo.reasonforsending;
       log(LOGTRACE, "TetraLogic::handleSdsMsg: LIP_SDS: TSI=" + t_sds.tsi
-          + "lat=" + to_string(lipinfo.latitude) + ", lon="
+          + ", lat=" + to_string(lipinfo.latitude) + ", lon="
           + to_string(lipinfo.longitude));
       break;
 
@@ -2524,7 +2524,7 @@ void TetraLogic::sendSystemInfo(void)
     systeminfo["model"] = model;
     systeminfo["call"] = callsign();
     systeminfo["issi"] = issi;
-    systeminfo["message"] = "Signal:info";
+    systeminfo["message"] = "System:info";
     systeminfo["tl_version"] = TETRA_LOGIC_VERSION;
     publishInfo("System:info", systeminfo);
 } /* TetraLogic::sendSystemInfo */
