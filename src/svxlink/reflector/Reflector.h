@@ -249,6 +249,11 @@ class Reflector : public sigc::trackable
     };
     std::map<std::string, User> userdata;
 
+    std::map<std::string, Json::Value> rssiStateMap;
+    std::map<std::string, Json::Value> qsoStateMap;
+    std::map<std::string, Json::Value> sdsStateMap;
+    std::map<std::string, Json::Value> systemStateMap;
+
     Reflector(const Reflector&);
     Reflector& operator=(const Reflector&);
     void clientConnected(Async::FramedTcpConnection *con);

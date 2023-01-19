@@ -134,7 +134,7 @@ using namespace SvxLink;
 
 #define MAX_TRIES 5
 
-#define TETRA_LOGIC_VERSION "13012023"
+#define TETRA_LOGIC_VERSION "19012023"
 
 /****************************************************************************
  *
@@ -1325,7 +1325,6 @@ void TetraLogic::handleSdsMsg(std::string sds)
   stringstream m_aprsinfo;
   std::map<unsigned int, string>::iterator it;
   LipInfo lipinfo;
-  Json::Value event(Json::arrayValue);
   Json::Value sdsinfo(Json::objectValue);
 
   t_sds.tos = pSDS.last_activity;      // last activity
@@ -1447,8 +1446,7 @@ void TetraLogic::handleSdsMsg(std::string sds)
   sdsinfo["receivertsi"] = pSDS.totsi;
   sdsinfo["gateway"] = callsign();
   sdsinfo["message"] = "Sds:info";
-  event.append(sdsinfo);
-  publishInfo("Sds:info", event);
+  publishInfo("Sds:info", sdsinfo);
 
   // send sds info of a user to aprs network
   if (m_aprsinfo.str().length() > 0)
