@@ -134,7 +134,7 @@ using namespace SvxLink;
 
 #define MAX_TRIES 5
 
-#define TETRA_LOGIC_VERSION "21012023"
+#define TETRA_LOGIC_VERSION "26012023"
 
 /****************************************************************************
  *
@@ -1215,11 +1215,12 @@ void TetraLogic::handleCallBegin(std::string message)
     return;
   }
 
-  userdata[o_tsi].last_activity = time(NULL);
+  uint32_t ti = time(NULL);
+  userdata[o_tsi].last_activity = ti;
 
   // store info in Qso struct
   Qso.tsi = o_tsi;
-  Qso.start = time(NULL);
+  Qso.start = ti;
 
   // prepare event for tetra users to be send over the network
   Json::Value qsoinfo(Json::objectValue);
@@ -1231,7 +1232,6 @@ void TetraLogic::handleCallBegin(std::string message)
   qsoinfo["dest_issi"] = t_ci.d_issi;
   qsoinfo["aimode"] = t_ci.aistatus;
   qsoinfo["cci"] = t_ci.instance;
-  uint32_t ti = time(NULL);
   qsoinfo["last_activity"] = ti;
 
   std::list<std::string>::iterator it;
@@ -2427,6 +2427,7 @@ void TetraLogic::handleRssi(std::string m_message)
 
     // send the rssi value to the refelctor network for further handling
     Json::Value t_rssi(Json::objectValue);
+    uint32_t ti = time(NULL);
     t_rssi["issi"] = dissi;
     t_rssi["mni"] = reg_mni;
     t_rssi["call"] = callsign();
@@ -2435,6 +2436,7 @@ void TetraLogic::handleRssi(std::string m_message)
     t_rssi["max_rssi"] = *max_element(rssi_list.begin(), rssi_list.end());
     t_rssi["min_rssi"] = *min_element(rssi_list.begin(), rssi_list.end());
     t_rssi["message"] = "Rssi:info";
+    t_rssi["last_activity"] = ti;
     publishInfo("Rssi:info", t_rssi);
     //log(LOGDEBUG, jsonToString(t_rssi));
     checkReg();
