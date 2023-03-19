@@ -134,7 +134,7 @@ using namespace SvxLink;
 
 #define MAX_TRIES 5
 
-#define TETRA_LOGIC_VERSION "12032023"
+#define TETRA_LOGIC_VERSION "19032023"
 
 /****************************************************************************
  *
@@ -1800,13 +1800,14 @@ void TetraLogic::handleCallReleased(std::string message)
     qsoinfo["dest_mnc"] = callinfo[cci].d_mnc;
     qsoinfo["dest_issi"] = callinfo[cci].d_issi;
     publishInfo("Qso:info", qsoinfo);
+    sendAprs(userdata[Qso.tsi].call, m_aprsmesg);
   }
   else
   {
     m_aprsmesg += ">Transmission ended";
+    sendAprs(callsign(), m_aprsmesg);
   }
   log(LOGTRACE, "TetraLogic::handleCallReleased: " + m_aprsmesg);
-  sendAprs(userdata[Qso.tsi].call, m_aprsmesg);
 
   talkgroup_up = false;
   Qso.members.clear();
