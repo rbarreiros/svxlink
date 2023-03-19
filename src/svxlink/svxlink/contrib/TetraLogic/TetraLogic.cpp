@@ -1650,7 +1650,7 @@ void TetraLogic::handleTxGrant(std::string txgrant)
   }
 
   current_cci = getNextVal(txgrant);
-  int txg = getNextVal(txgrant);
+  getNextVal(txgrant);
   getNextVal(txgrant);
   getNextVal(txgrant);
   getNextVal(txgrant);
@@ -2522,6 +2522,7 @@ void TetraLogic::handleRssi(std::string m_message)
     t_rssi["max_rssi"] = *max_element(rssi_list.begin(), rssi_list.end());
     t_rssi["min_rssi"] = *min_element(rssi_list.begin(), rssi_list.end());
     t_rssi["message"] = "Rssi:info";
+    t_rssi["last_activity"] = ti;
     publishInfo("Rssi:info", t_rssi);
 
     //log(LOGDEBUG, jsonToString(t_rssi));
