@@ -350,7 +350,7 @@ void Reflector::updateQsostate(Json::Value eventmessage)
   if (it != qsoStateMap.end())
   {
     it->second.append(eventmessage);
-    if (it->second.size() > 14)
+    if (it->second.size() > 14)  // store the last 15 qso's
     {
       Json::Value jv;
       for (auto a =1;a<16;a++)
