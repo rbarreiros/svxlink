@@ -607,13 +607,12 @@ void ReflectorLogic::remoteReceivedTgUpdated(LogicBase *logic, uint32_t tg)
 void ReflectorLogic::remoteReceivedPublishStateEvent(
     LogicBase *logic, const std::string& event_name, const std::string& data)
 {
-  //cout << "### ReflectorLogic::remoteReceivedPublishStateEvent:"
-  //     << " logic=" << logic->name()
-  //     << " event_name=" << event_name
-  //     << " data=" << data
-  //     << endl;
+  cout << "### ReflectorLogic::remoteReceivedPublishStateEvent:"
+       << " logic=" << logic->name()
+       << " event_name=" << event_name
+       << " data=" << data
+       << endl;
   //sendMsg(MsgStateEvent(logic->name(), event_name, msg));
-
   if (event_name == "Voter:sql_state")
   {
     //MsgUdpSignalStrengthValues msg;
@@ -726,17 +725,16 @@ void ReflectorLogic::remoteReceivedPublishStateEvent(
     Json::Value user_info;
     is >> user_info;
     user_info["TG"] = m_selected_tg;
-    string ud =jsonToString(user_info);
+    string ud = jsonToString(user_info);
 
-     // cout << "sende: " << event_name << "," << ud << endl;
     MsgStateEvent msg(logic->name(), event_name, ud);
     sendMsg(msg);
   }
   else if (event_name == "Sds:info" || event_name == "DvUsers:info" ||
            event_name == "Rssi:info" || event_name == "System:info" ||
-           event_name == "Qso:info" || event_name == "Register:info")
+           event_name == "Qso:info" || event_name == "Register:info" ||
+           event_name == "ForwardSds:info")
   {
-   // cout << "sende: " << event_name << "," << data << endl;
     MsgStateEvent msg(logic->name(), event_name, data);
     sendMsg(msg);
   }
@@ -1871,12 +1869,8 @@ void ReflectorLogic::handlePlayDtmf(const std::string& digit, int amp,
 string ReflectorLogic::jsonToString(Json::Value eventmessage)
 {
   Json::StreamWriterBuilder builder;
-  std::unique_ptr<Json::StreamWriter> writer(builder.newStreamWriter());
-  std::ostringstream ostream;
-  writer->write(eventmessage, &ostream);
-  std::string message = ostream.str();
-  message.erase(std::remove_if(message.begin(), message.end(), 
-                [](unsigned char x){return std::iscntrl(x);}));
+  builder["indentation"] = "";
+  std::string message = Json::writeString(builder, eventmessage);
   return message;
 } /* ReflectorLogic::jsonToString */
 

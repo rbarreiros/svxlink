@@ -286,8 +286,9 @@ class Reflector : public sigc::trackable
     void onRequestAutoQsy(uint32_t from_tg);
     uint32_t nextRandomQsyTg(void);
     bool getUserData(void);
-    void writeUserData(std::map<std::string, User> userdata);
+    void writeUserData(void);
     std::string jsonToString(Json::Value eventmessage);
+    void requestNodeInfos(void);
 
 };  /* class Reflector */
 

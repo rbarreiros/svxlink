@@ -134,7 +134,7 @@ using namespace SvxLink;
 
 #define MAX_TRIES 5
 
-#define TETRA_LOGIC_VERSION "19032023"
+#define TETRA_LOGIC_VERSION "01062023"
 
 /****************************************************************************
  *
@@ -206,6 +206,7 @@ TetraLogic::TetraLogic(void)
   sds_when_proximity(false), peiComTimer(2000, Timer::TYPE_ONESHOT, false),
   peiActivityTimer(10000, Timer::TYPE_ONESHOT, true),
   peiBreakCommandTimer(3000, Timer::TYPE_ONESHOT, false),
+  t_aprs_sym('E'), t_aprs_tab('/'),
   proximity_warning(3.1), time_between_sds(3600), own_lat(0.0),
   own_lon(0.0), endCmd(""), new_sds(false), inTransmission(false),
   cmgs_received(true), share_userinfo(true), current_cci(0), dmnc(0),
@@ -834,7 +835,7 @@ void TetraLogic::squelchOpen(bool is_open)
   // should be allowed. Commenting out the statements below.
   std::string s = (is_open ? "true" : "false");
   log(LOGTRACE, "TetraLogic::squelchOpen: squelchopen=" + s);
-  
+
   if (tx().isTransmitting())
   {
     log(LOGTRACE, "TetraLogic::squelchOpen: tx().isTransmitting()=true");
@@ -921,6 +922,7 @@ void TetraLogic::sendUserInfo(void)
 
   // read infos of tetra users configured in svxlink.conf
   Json::Value event(Json::arrayValue);
+  int a = 0;
 
   for (std::map<std::string, User>::iterator iu = userdata.begin();
        iu!=userdata.end(); iu++)
@@ -939,6 +941,12 @@ void TetraLogic::sendUserInfo(void)
     t_userinfo["registered"] = iu->second.registered;
     t_userinfo["message"] = "DvUsers:info";
     event.append(t_userinfo);
+    if (a++ > 5)
+    {
+      a = 0;
+      publishInfo("DvUsers:info", event);
+      event.clear();
+    }
   }
   publishInfo("DvUsers:info", event);
 } /* TetraLogic::sendUserInfo */
@@ -1290,6 +1298,7 @@ void TetraLogic::handleCallBegin(std::string message)
 */
 void TetraLogic::handleSds(std::string sds)
 {
+  cout << "***handleSds: " << sds << endl;
   sds.erase(0,9);  // remove "+CTSDSR: "
 
   // store header of sds for further handling
@@ -1307,8 +1316,11 @@ void TetraLogic::handleSds(std::string sds)
 void TetraLogic::firstContact(Sds tsds)
 {
   uint32_t ti = time(NULL);
+  userdata[tsds.tsi].issi = tsds.tsi;
   userdata[tsds.tsi].call = "NoCall";
   userdata[tsds.tsi].name = "NoName";
+  userdata[tsds.tsi].comment = "no call available for ";
+  userdata[tsds.tsi].comment += tsds.tsi;
   userdata[tsds.tsi].idtype = "tsi";
   userdata[tsds.tsi].mode = "TETRA";
   userdata[tsds.tsi].aprs_sym = t_aprs_sym;
@@ -1338,6 +1350,8 @@ void TetraLogic::firstContact(Sds tsds)
 */
 void TetraLogic::handleSdsMsg(std::string sds)
 {
+  cout << "***handleSdsMsg: " << sds << endl;
+
   log(LOGTRACE, "TetraLogic::handleSdsMsg: " + sds);
   Sds t_sds;
   stringstream ss, sstcl;
@@ -1612,6 +1626,8 @@ void TetraLogic::handleCmgs(std::string m_message)
 
 std::string TetraLogic::handleTextSds(std::string m_message)
 {
+  cout << "***handleTextSds: " << m_message << endl;
+
   if (m_message.length() > 8) m_message.erase(0,8);  // delete 00A3xxxx
   return decodeSDS(m_message);
 } /* TetraLogic::handleTextSds */
@@ -1627,6 +1643,7 @@ string TetraLogic::handleAckSds(string m_message, string tsi)
 
 std::string TetraLogic::handleSimpleTextSds(std::string m_message)
 {
+  cout << "***handleSimpleTextSds: " << m_message << endl;
   if (m_message.length() > 4) m_message.erase(0,4);  // delete 0201
   return decodeSDS(m_message);
 } /* TetraLogic::handleSimpleTextSds */
@@ -2189,13 +2206,13 @@ void TetraLogic::onPublishStateEvent(const string &event_name, const string &msg
       m_user.issi = t_userdata.get("id", "").asString();
       m_user.idtype = t_userdata.get("idtype", "").asString();
       m_user.mode = t_userdata.get("mode", "").asString();
-      m_user.name = t_userdata.get("name","").asString();
-      m_user.call = t_userdata.get("call","").asString();
-      m_user.location = t_userdata.get("location","").asString();
-      m_user.aprs_sym = static_cast<char>(t_userdata.get("sym","").asInt());
-      m_user.aprs_tab = static_cast<char>(t_userdata.get("tab","").asInt());
-      m_user.comment = t_userdata.get("comment","").asString();
-      m_user.last_activity = t_userdata.get("last_activity","").asUInt();
+      m_user.name = t_userdata.get("name", "").asString();
+      m_user.call = t_userdata.get("call", "").asString();
+      m_user.location = t_userdata.get("location", "").asString();
+      m_user.aprs_sym = static_cast<char>(t_userdata.get("sym", 0).asInt());
+      m_user.aprs_tab = static_cast<char>(t_userdata.get("tab", 0).asInt());
+      m_user.comment = t_userdata.get("comment", "").asString();
+      m_user.last_activity = t_userdata.get("last_activity", 0).asUInt();
 
       userdata[m_user.issi] = m_user;
       log(LOGDEBUG, "Tsi:" + m_user.issi + ", call=" + m_user.call 
@@ -2206,9 +2223,9 @@ void TetraLogic::onPublishStateEvent(const string &event_name, const string &msg
   else if (event_name == "ForwardSds:info")
   {
     Json::Value t_msg = user_arr[0];
-    std::string destcall = t_msg.get("dest_call","").asString();
-    std::string msg = t_msg.get("sds_info","").asString();
-    std::string source = t_msg.get("source","").asString();
+    std::string destcall = t_msg.get("dest_call", "").asString();
+    std::string msg = t_msg.get("sds_info", "").asString();
+    std::string source = t_msg.get("source", "").asString();
 
     for (std::map<std::string, User>::iterator iu = userdata.begin();
        iu != userdata.end(); iu++)
@@ -2227,6 +2244,10 @@ void TetraLogic::onPublishStateEvent(const string &event_name, const string &msg
             + ":" + msg);
       }
     }
+  }
+  else if (event_name == "Request:info")
+  {
+    sendSystemInfo();
   }
 } /* TetraLogic::onPublishStateEvent */
 
@@ -2419,28 +2440,37 @@ bool TetraLogic::checkIfDapmessage(std::string message)
 {
   string destcall = "";
 
-  if (rmatch(message, "^(dap|DAP):[0-9A-Za-z]{3,8}:"))
+  if (rmatch(message, "^(to|TO):[0-9A-Za-z]{3,8}:"))
+  {
+    message.erase(0,3);
+  }
+  else if (rmatch(message, "^(dap|DAP):[0-9A-Za-z]{3,8}:"))
   {
     message.erase(0,4);
-    destcall = message.substr(0, message.find(":"));
-    message.erase(0, message.find(":")+1);
-
-    Json::Value sds(Json::objectValue);
-    sds["dest_callsign"] = destcall;
-    sds["sdsmessage"] = message;
-    sds["gateway"] = callsign();
-    sds["message"] = "ForwardSds:info";
-    publishInfo("ForwardSds:info", sds);
-
-    // send into DAPNet if registered
-    if (dapnetclient)
-    {
-      log(LOGDEBUG, "To DAPNET: call=" + destcall + ", message:" + message);
-      dapnetclient->sendDapMessage(destcall, message);
-    }
-    return true;
   }
-  return false;
+  else
+  {
+    return false;
+  }
+
+  destcall = message.substr(0, message.find(":"));
+  message.erase(0, message.find(":")+1);
+
+  // send into DAPNet if registered
+  if (dapnetclient)
+  {
+    log(LOGDEBUG, "To DAPNET: call=" + destcall + ", message:" + message);
+    dapnetclient->sendDapMessage(destcall, message);
+  }
+
+  Json::Value sds(Json::objectValue);
+  sds["dest_callsign"] = destcall;
+  sds["sdsmessage"] = message;
+  sds["gateway"] = callsign();
+  sds["message"] = "ForwardSds:info";
+  publishInfo("ForwardSds:info", sds);
+
+  return true;
 } /* TetraLogic::checkIfDapmessage */
 
 
@@ -2653,6 +2683,7 @@ void TetraLogic::registerUser(std::string tsi)
         t_userinfo["comment"] = iu->second.comment;
         t_userinfo["location"] = iu->second.location;
         t_userinfo["last_activity"] = (uint32_t)iu->second.last_activity;
+        t_userinfo["registered"] = iu->second.registered;
         t_userinfo["message"] = "Register:info";
         event.append(t_userinfo);
       }
