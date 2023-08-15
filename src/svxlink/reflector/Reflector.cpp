@@ -487,6 +487,26 @@ void Reflector::forwardSds(Json::Value eventmessage)
 } /* Reflector::forwardSds */
 
 
+void Reflector::forwardEventState(ReflectorClient* origin, const std::string& name,
+                           Json::Value& message, bool broadcast)
+{
+  MsgStateEvent event = MsgStateEvent("Reflector", name, jsonToString(message));
+
+  for (const auto& item : m_client_con_map)
+  {
+    ReflectorClient* client = item.second;
+    if ((client != origin) &&
+        (client->conState() == ReflectorClient::STATE_CONNECTED) &&
+        ((broadcast) ||
+        (client->currentTG() == origin->currentTG())))
+    {
+      // Forward event state to all nodes except origin
+      client->sendMsg(event);
+    }
+  }
+} /* Reflector::forwardEventState */
+
+
 void Reflector::nodeList(std::vector<std::string>& nodes) const
 {
   nodes.clear();

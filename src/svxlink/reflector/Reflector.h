@@ -224,6 +224,16 @@ class Reflector : public sigc::trackable
      */
     void forwardSds(Json::Value eventmessage);
 
+    /**
+     * @brief  Forward event state to every node except origin
+     * @param  originating client
+     * @param  event name
+     * @param  event message
+     * @param  broadcast to every connected client or only group connected
+     */
+    void forwardEventState(ReflectorClient* origin, const std::string& name, Json::Value& message, bool broadcast);
+
+
   private:
     typedef std::map<Async::FramedTcpConnection*,
                      ReflectorClient*> ReflectorClientConMap;
