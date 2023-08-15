@@ -887,6 +887,9 @@ void ReflectorLogic::onFrameReceived(FramedTcpConnection *con,
     case MsgRequestQsy::TYPE:
       handleMsgRequestQsy(ss);
       break;
+    case MsgStateEvent::TYPE:
+      handleMsgStateEvent(ss);
+      break;
     default:
       // Better just ignoring unknown messages for easier addition of protocol
       // messages while being backwards compatible
@@ -1269,6 +1272,20 @@ void ReflectorLogic::handleMsgRequestQsy(std::istream& is)
     processEvent(os.str());
   }
 } /* ReflectorLogic::handleMsgRequestQsy */
+
+
+void ReflectorLogic::handleMsgStateEvent(std::istream& is)
+{
+  MsgStateEvent msg;
+  if (!msg.unpack(is))
+  {
+    cerr << "*** ERROR[" << name() << "]: Could not unpack MsgStateEvent\n";
+    disconnect();
+    return;
+  }
+
+  publishStateEvent(msg.name(), msg.msg());
+} /* ReflectorLogic::handleMsgStateEvent */
 
 
 void ReflectorLogic::sendMsg(const ReflectorMsg& msg)

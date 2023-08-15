@@ -134,7 +134,7 @@ using namespace SvxLink;
 
 #define MAX_TRIES 5
 
-#define TETRA_LOGIC_VERSION "02062023"
+#define TETRA_LOGIC_VERSION "15082023"
 
 /****************************************************************************
  *

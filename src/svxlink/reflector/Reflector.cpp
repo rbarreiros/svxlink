@@ -498,7 +498,8 @@ void Reflector::forwardEventState(ReflectorClient* origin, const std::string& na
     if ((client != origin) &&
         (client->conState() == ReflectorClient::STATE_CONNECTED) &&
         ((broadcast) ||
-        (client->currentTG() == origin->currentTG())))
+        (client->currentTG() == origin->currentTG()) ||
+        (client->monitoredTGs().find(origin->currentTG()) != client->monitoredTGs().end())))
     {
       // Forward event state to all nodes except origin
       client->sendMsg(event);
