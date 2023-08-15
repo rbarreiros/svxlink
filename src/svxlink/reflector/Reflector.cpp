@@ -491,6 +491,7 @@ void Reflector::forwardEventState(ReflectorClient* origin, const std::string& na
                            Json::Value& message, bool broadcast)
 {
   MsgStateEvent event = MsgStateEvent("Reflector", name, jsonToString(message));
+  uint32_t group = TGHandler::instance()->TGForClient(origin);
 
   for (const auto& item : m_client_con_map)
   {
@@ -498,8 +499,8 @@ void Reflector::forwardEventState(ReflectorClient* origin, const std::string& na
     if ((client != origin) &&
         (client->conState() == ReflectorClient::STATE_CONNECTED) &&
         ((broadcast) ||
-        (client->currentTG() == origin->currentTG()) ||
-        (client->monitoredTGs().find(origin->currentTG()) != client->monitoredTGs().end())))
+        (client->currentTG() == group) ||
+        (client->monitoredTGs().find(group) != client->monitoredTGs().end())))
     {
       // Forward event state to all nodes except origin
       client->sendMsg(event);
