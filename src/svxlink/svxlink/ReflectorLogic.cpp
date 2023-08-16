@@ -1213,6 +1213,11 @@ void ReflectorLogic::handleMsgTalkerStart(std::istream& is)
   std::ostringstream ss;
   ss << "talker_start " << msg.tg() << " " << msg.callsign();
   processEvent(ss.str());
+
+  Json::Value event(Json::objectValue);
+  event["tg"] = msg.tg();
+  event["callsign"] = msg.callsign();
+  publishStateEvent("Reflector:talker_start", jsonToString(event));
 } /* ReflectorLogic::handleMsgTalkerStart */
 
 

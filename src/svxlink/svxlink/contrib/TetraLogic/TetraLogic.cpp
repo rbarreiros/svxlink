@@ -134,7 +134,7 @@ using namespace SvxLink;
 
 #define MAX_TRIES 5
 
-#define TETRA_LOGIC_VERSION "15082023"
+#define TETRA_LOGIC_VERSION "16082023"
 
 /****************************************************************************
  *
@@ -319,7 +319,7 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
            << "a comma is used it has to be encoded with an additional "
            << "'\', e.g. " << "DEFAULT_APRS_ICON=\\r" << endl;
     }
-    else 
+    else
     {
       t_aprs_sym = value[0];
       t_aprs_tab = value[1];
@@ -348,7 +348,7 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
   string user_section;
   if (cfg().getValue(name(), "TETRA_USERS", user_section))
   {
-    cout 
+    cout
       << "***************************************************************\n"
       << "* WARNING: The parameter TETRA_USERS is outdated and will be  *\n"
       << "* removed soon. Use TETRA_USER_INFOFILE=tetra_users.json in-  *\n"
@@ -378,7 +378,7 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
         if (m_aprs.length() != 2)
         {
           cout << "*** ERROR: Check Aprs icon definition for " << m_user.call
-               << " in section " << user_section 
+               << " in section " << user_section
                << ". It must have exactly 2 characters, e.g.: 'e\'" << endl;
           isok = false;
         }
@@ -513,7 +513,7 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
       if (tetra_mode == t_peiinit.get("mode","").asString())
       {
         Json::Value& t_a = t_peiinit["commands"];
-        log(LOGDEBUG, 
+        log(LOGDEBUG,
         "+++ Reading AT-commands to initialze PEI-device. Reading from file" +
         pei_init_file + "\"");
         for (Json::Value::ArrayIndex j = 0; j < t_a.size(); j++)
@@ -533,12 +533,12 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
       "in further versions of tetra-contrib. Please change your " <<
       "configuration and use the pei-init.json to define AT " <<
       "initializing commands. Please also read the manual page." << endl;
-    log(LOGDEBUG, 
+    log(LOGDEBUG,
       "+++ Reading AT commands by using the parameter svxlink.conf/INIT_PEI=");
   }
   else
   {
-    cout << "+++ WARNING: No PEI initializing sequence defined, you " << 
+    cout << "+++ WARNING: No PEI initializing sequence defined, you " <<
       "should configure the parameter PEI_INIT_FILE in your TetraLogic.conf " <<
       "in svxlink.d directory. Please also read the manual page." << endl;
   }
@@ -555,7 +555,7 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
       if (value.length() > 100)
       {
         cout << "+++ WARNING: Message to long (>100 digits) at " << name()
-             << "/" << sds_useractivity << ": " << (*slit) 
+             << "/" << sds_useractivity << ": " << (*slit)
              << ". Cutting message.";
         sds_on_activity[atoi((*slit).c_str())] = value.substr(0,100);
       }
@@ -580,7 +580,7 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
       if (isds < 32768 || isds > 65535)
       {
         cout << "*** ERROR: Sds decimal value in section " << name()
-             << "/SDS_TO_COMMAND is not valid (" << isds 
+             << "/SDS_TO_COMMAND is not valid (" << isds
              << "), must be between 32768 and 65535" << endl;
       }
       else
@@ -763,7 +763,7 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
 
 void TetraLogic::remoteCmdReceived(LogicBase* src_logic, const std::string& cmd)
 {
-  log(LOGTRACE, "TetraLogic::remoteCmdReceived: " 
+  log(LOGTRACE, "TetraLogic::remoteCmdReceived: "
            + src_logic->name() + " -> " + cmd);
 } /* TetraLogic::remoteCmdReceived */
 
@@ -804,7 +804,7 @@ void TetraLogic::transmitterStateChange(bool is_transmitting)
       initGroupCall(gssi);
       talkgroup_up = true;
     }
-    else 
+    else
     {
       cmd = "AT+CTXD=";
       cmd += std::to_string(current_cci);
@@ -1501,7 +1501,7 @@ void TetraLogic::handleSdsMsg(std::string sds)
 
 
 // 6.15.6 TETRA Group Set up
-// +CTGS [<group type>], <called party identity> ... [,[<group type>], 
+// +CTGS [<group type>], <called party identity> ... [,[<group type>],
 //       < called party identity>]
 // In V+D group type shall be used. In DMO the group type may be omitted,
 // as it will be ignored.
@@ -1610,7 +1610,7 @@ void TetraLogic::handleCmgs(std::string m_message)
         {
           it->second = pending_sds;
           log(LOGINFO, "+++ message (" + to_string(it->second.id)
-              + ") with ref#" + to_string(id) + " to " 
+              + ") with ref#" + to_string(id) + " to "
               + it->second.tsi + " successfully sent.");
           break;
         }
@@ -1697,7 +1697,7 @@ std::string TetraLogic::getTSI(std::string issi)
 {
   stringstream ss;
   char is[18];
-  int len = issi.length(); 
+  int len = issi.length();
   int t_mcc;
   std::string t_issi;
 
@@ -2047,10 +2047,10 @@ void TetraLogic::sendInfoSds(std::string tsi, short reason)
         {
           ss << "DMO=off";
           sstcl << "dmo_off " << t_iu->first;
-        } 
+        }
         else if (sds_when_proximity && distancediff <= proximity_warning)
         {
-          ss << "Dist:" << distancediff << "km, Bear:" << std::fixed 
+          ss << "Dist:" << distancediff << "km, Bear:" << std::fixed
              << setprecision(1) << bearing << "deg";
           sstcl << "proximity_info " << t_iu->first << " " << distancediff
                 << " " << std::fixed << setprecision(1) << bearing;
@@ -2215,7 +2215,7 @@ void TetraLogic::onPublishStateEvent(const string &event_name, const string &msg
       m_user.last_activity = t_userdata.get("last_activity", 0).asUInt();
 
       userdata[m_user.issi] = m_user;
-      log(LOGDEBUG, "Tsi:" + m_user.issi + ", call=" + m_user.call 
+      log(LOGDEBUG, "Tsi:" + m_user.issi + ", call=" + m_user.call
           + ", name=" + m_user.name + ", location=" + m_user.location
           + ", comment=" + m_user.comment);
     }
@@ -2319,7 +2319,7 @@ bool TetraLogic::checkSds(void)
     // find the next SDS that was still not send
     for (it=sdsQueue.begin(); it!=sdsQueue.end(); it++)
     {
-      if (it->second.tos == 0 && it->second.direction == OUTGOING 
+      if (it->second.tos == 0 && it->second.direction == OUTGOING
           && it->second.nroftries < MAX_TRIES)
       {
         pending_sds = it->second;
@@ -2336,7 +2336,7 @@ bool TetraLogic::checkSds(void)
   {
     if (pending_sds.nroftries++ > MAX_TRIES)
     {
-      log(LOGERROR, "+++ sending of Sds message failed after " 
+      log(LOGERROR, "+++ sending of Sds message failed after "
            + to_string(MAX_TRIES) + " tries, giving up.");
     }
     else
@@ -2558,7 +2558,7 @@ void TetraLogic::handleRssi(std::string m_message)
     //log(LOGDEBUG, jsonToString(t_rssi));
     checkReg();
 
-    // no action if the value is above the defined limit 
+    // no action if the value is above the defined limit
     if (rssi > qos_limit) return;
 
     // send email (via the tcl framework) to the administrator
@@ -2607,7 +2607,7 @@ void TetraLogic::handleCreg(std::string m_message)
   // +CREG: 1,1,90109999
   if (m_message.length()>5) m_message.erase(0,6);
   reg_state = getNextVal(m_message);
-  reg_la = getNextVal(m_message); // 14-bit Location Area code 
+  reg_la = getNextVal(m_message); // 14-bit Location Area code
   reg_mni = getNextVal(m_message); // 24-bit Mobile Network Identity
   stringstream ss;
   ss << "Registration LA=" << reg_la << ", MNI=" <<
