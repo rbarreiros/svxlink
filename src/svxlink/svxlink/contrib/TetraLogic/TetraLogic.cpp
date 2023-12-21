@@ -134,7 +134,7 @@ using namespace SvxLink;
 
 #define MAX_TRIES 5
 
-#define TETRA_LOGIC_VERSION "16082023"
+#define TETRA_LOGIC_VERSION "21122023"
 
 /****************************************************************************
  *
@@ -213,7 +213,7 @@ TetraLogic::TetraLogic(void)
   dmcc(0), dissi(0), infosds(""), is_tx(false), last_sdsid(0), pei_pty_path(""),
   pei_pty(0), ai(-1), check_qos(0), qos_sds_to("0815"), qos_limit(-90),
   qosTimer(300000, Timer::TYPE_ONESHOT, false), min_rssi(100), max_rssi(100),
-  reg_cell(0), reg_la(0), reg_mni(0), vendor(""), model("")
+  reg_cell(0), reg_la(0), reg_mni(0), vendor(""), model(""), inactive_time(3600)
 {
   peiComTimer.expired.connect(mem_fun(*this, &TetraLogic::onComTimeout));
   peiActivityTimer.expired.connect(mem_fun(*this,
@@ -221,6 +221,7 @@ TetraLogic::TetraLogic(void)
   peiBreakCommandTimer.expired.connect(mem_fun(*this,
                             &TetraLogic::onPeiBreakCommandTimeout));
   qosTimer.expired.connect(mem_fun(*this, &TetraLogic::onQosTimeout));
+  userRegTimer.expired.connect(mem_fun(*this, &TetraLogic::userRegTimeout));
 } /* TetraLogic::TetraLogic */
 
 
@@ -662,6 +663,15 @@ bool TetraLogic::initialize(Async::Config& cfgobj, const std::string& logic_name
     time_between_sds = atoi(value.c_str());
   }
 
+  if (cfg().getValue(name(), "INACTIVE_AFTER", value))
+  {
+    inactive_time = atoi(value.c_str());
+    if (inactive_time < 100 || inactive_time > 14400)
+    {
+      inactive_time = 3600;
+    }
+  }
+  
   cfg().getValue(name(), "END_CMD", endCmd);
 
   std::string dapnet_server;
@@ -2249,6 +2259,17 @@ void TetraLogic::onPublishStateEvent(const string &event_name, const string &msg
   {
     sendSystemInfo();
   }
+  else if (event_name == "Qso:info")
+  {
+    // toDo
+    Json::Value t_msg = user_arr[0];
+    stringstream ss;
+    ss << "Got message:" << t_msg.get("name", "").asString() << ","
+       << t_msg.get("comment", "").asString() << ","
+       << t_msg.get("idtype", "").asString() << ","
+       << t_msg.get("tsi", 0).asInt();
+    log(LOGTRACE, "TetraLogic::onPublishStateEvent: " + ss.str());
+  }
 } /* TetraLogic::onPublishStateEvent */
 
 
@@ -2290,7 +2311,7 @@ void TetraLogic::clearOldSds(void)
   // delete all old Sds //
   for (it=sdsQueue.begin(); it!=sdsQueue.end(); it++)
   {
-    if (it->second.tos != 0 && difftime(it->second.tos, time(NULL)) > 3600)
+    if (it->second.tos != 0 && difftime(it->second.tos, time(NULL)) > inactive_time)
     {
       log(LOGTRACE, "TetraLogic::clearOldSds: " + it->second.tsi
             + "->" + it->second.message);
@@ -2647,8 +2668,8 @@ void TetraLogic::sendSystemInfo(void)
 } /* TetraLogic::sendSystemInfo */
 
 
-// register an active user, "active" means that SvxLink has registerd an
-// activity within the last 3600 seconds (sds, ptt, messages or whatever)
+// register an active user, "active" means that SvxLink has registered an
+// activity within the last "inactive_time" seconds (sds, ptt, messages or whatever)
 void TetraLogic::registerUser(std::string tsi)
 {
   Json::Value event(Json::arrayValue);
@@ -2667,31 +2688,54 @@ void TetraLogic::registerUser(std::string tsi)
     Json::Value t_userinfo(Json::objectValue);
     if (iu->second.registered)
     {
-      if (iu->second.last_activity < ti - 3600)
-      {
-        iu->second.registered = false; // set to not active if >3600 secs
-      }
-      else
-      {
-        t_userinfo["tsi"] = iu->second.issi;
-        t_userinfo["idtype"] = iu->second.idtype;
-        t_userinfo["call"] = iu->second.call;
-        t_userinfo["mode"] = iu->second.mode;
-        t_userinfo["name"] = iu->second.name;
-        t_userinfo["tab"] = iu->second.aprs_tab;
-        t_userinfo["sym"] = iu->second.aprs_sym;
-        t_userinfo["comment"] = iu->second.comment;
-        t_userinfo["location"] = iu->second.location;
-        t_userinfo["last_activity"] = (uint32_t)iu->second.last_activity;
-        t_userinfo["registered"] = iu->second.registered;
-        t_userinfo["message"] = "Register:info";
-        event.append(t_userinfo);
-      }
+      t_userinfo["tsi"] = iu->second.issi;
+      t_userinfo["idtype"] = iu->second.idtype;
+      t_userinfo["call"] = iu->second.call;
+      t_userinfo["mode"] = iu->second.mode;
+      t_userinfo["name"] = iu->second.name;
+      t_userinfo["tab"] = iu->second.aprs_tab;
+      t_userinfo["sym"] = iu->second.aprs_sym;
+      t_userinfo["comment"] = iu->second.comment;
+      t_userinfo["location"] = iu->second.location;
+      t_userinfo["last_activity"] = (uint32_t)iu->second.last_activity;
+      t_userinfo["registered"] = iu->second.registered;
+      t_userinfo["message"] = "Register:info";
+      event.append(t_userinfo);
     }
   }
 
   publishInfo("Register:info", event);
+  checkUserReg();
 } /* TetraLogic::registerUser */
+
+
+void TetraLogic::userRegTimeout(Async::Timer *timer)
+{
+  checkUserReg();
+  userRegTimer.reset();
+  userRegTimer.setEnable(true);
+} /* TetraLogic::userRegTimeout */
+
+
+void TetraLogic::checkUserReg(void)
+{
+  time_t ti = time(NULL);
+
+  // update user list (set to active or not active)
+  std::map<std::string, User>::iterator iu;
+
+  for (iu = userdata.begin(); iu != userdata.end(); iu++)
+  {
+    if (iu->second.registered && iu->second.last_activity < ti - inactive_time)
+    {
+      iu->second.registered = false; // set to not active if >inactive_time secs
+      stringstream so;
+      so << "+++ CheckUserRegistration:" << iu->second.issi
+         << " is now unregistered." << endl;
+      log(LOGDEBUG, so.str());
+    }
+  }
+} /* TetraLogic::checkUserReg */
 
 
 std::string TetraLogic::jsonToString(Json::Value eventmessage)
