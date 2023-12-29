@@ -134,7 +134,7 @@ using namespace SvxLink;
 
 #define MAX_TRIES 5
 
-#define TETRA_LOGIC_VERSION "21122023"
+#define TETRA_LOGIC_VERSION "29122023"
 
 /****************************************************************************
  *
@@ -2262,7 +2262,8 @@ void TetraLogic::onPublishStateEvent(const string &event_name, const string &msg
   else if (event_name == "Qso:info")
   {
     // toDo
-    Json::Value t_msg = user_arr[0];
+    Json::Value t_msg;
+    (user_arr.isArray() ? t_msg = user_arr[0] : t_msg = user_arr);
     stringstream ss;
     ss << "Got message:" << t_msg.get("name", "").asString() << ","
        << t_msg.get("comment", "").asString() << ","
