@@ -1,0 +1,7 @@
+{
+    "cmake.sourceDirectory": "/home/rbarreiros/Projectos/Ham/svxlink/src"
+    "cmake.configureArgs": [
+        "-DUSE_QT=OFF",
+        "-DCMAKE_INSTALL_PREFIX=/home/rbarreiros/Projectos/Ham/svxlink_bin"
+    ]
+}

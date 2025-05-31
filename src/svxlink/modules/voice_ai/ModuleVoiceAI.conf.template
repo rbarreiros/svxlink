@@ -1,0 +1,39 @@
+[ModuleVoiceAI]
+NAME=VoiceAI
+PLUGIN_NAME=ModuleVoiceAI
+TIMEOUT=300
+
+# Whisper speech recognition configuration
+WHISPER_MODEL_PATH=/usr/share/svxlink/models/ggml-base.en.bin
+WHISPER_LANGUAGE=en
+WHISPER_THREADS=1
+
+# Piper text-to-speech configuration  
+PIPER_MODEL_PATH=/usr/share/svxlink/models/en_US-lessac-medium.onnx
+PIPER_VOICE_SPEED=1.0
+
+# Voice activation settings
+WAKE_WORD=jarvis
+LISTEN_TIMEOUT_MS=5000
+VOICE_BUFFER_SIZE_SEC=5
+SILENCE_TIMEOUT_MS=500
+
+# Audio processing parameters
+SAMPLE_RATE=16000
+MIN_SPEECH_DURATION_MS=1000
+AUDIO_GAIN=1.0
+
+# Response settings
+ENABLE_VOICE_FEEDBACK=1
+CONFIRMATION_SOUNDS=1
+ERROR_ANNOUNCEMENTS=1
+
+# Debug and logging options
+DEBUG_MODE=0
+LOG_RECOGNIZED_TEXT=1
+LOG_INTENT_PROCESSING=0
+
+# Security settings (optional)
+REQUIRE_WAKE_WORD=1
+MAX_COMMAND_LENGTH=50
+COMMAND_TIMEOUT_SEC=30
