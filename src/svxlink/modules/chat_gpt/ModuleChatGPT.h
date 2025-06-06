@@ -1,31 +1,39 @@
-#ifndef MODULE_CHAT_GPT_INCLUDED
-#define MODULE_CHAT_GPT_INCLUDED
+#ifndef MODULE_CHATGPT_INCLUDED
+#define MODULE_CHATGPT_INCLUDED
 
-#include <vector>
-
-#include <AsyncTimer.h>
 #include <Module.h>
+#include <string>
 
-#include "version/SVXLINK.h"
+// Forward declarations
+namespace Async {
+  class AudioRecorder;
+  class AudioPlayer;
+  class Timer;
+}
 
 class ModuleChatGPT : public Module
 {
   public:
     ModuleChatGPT(void *dl_handle, Logic *logic, const std::string& cfg_name);
     ~ModuleChatGPT(void);
-    const char *compiledForVersion(void) const { return SVXLINK_APP_VERSION; }
+    const char *compiledForVersion(void) const { return SVXLINK_VERSION; }
 
-    
   protected:
-    virtual void resumeOutput(void);
-    virtual void allSamplesFlushed(void);
-    virtual int writeSamples(const float *samples, int count);
-    virtual void flushSamples(void);
-  
+    void resumeOutput(void);
+    void allSamplesFlushed(void);
+    int writeSamples(const float *samples, int count);
+    void flushSamples(void);
+    bool initialize(void);
+    void activateInit(void);
+    void deactivateCleanup(void);
+    bool dtmfDigitReceived(char digit, int duration);
+    void dtmfCmdReceived(const std::string& cmd);
+    void dtmfCmdReceivedWhenIdle(const std::string& cmd);
+    void squelchOpen(bool is_open);
+    void allMsgsWritten(void);
+
   private:
-    
-    enum State 
-    {
+    enum State {
       STATE_IDLE,
       STATE_LISTENING,
       STATE_PROCESSING,
@@ -41,43 +49,25 @@ class ModuleChatGPT : public Module
     double                  m_temperature;
     bool                    m_recording;
     std::string             m_temp_audio_file;
-    std::string             m_recorded_samples_file;
     
+    Async::AudioRecorder   *m_recorder;
+    Async::AudioPlayer     *m_player;
     Async::Timer           *m_timeout_timer;
     
-    // Audio recording variables
-    std::vector<float>      m_recorded_samples;
-    bool                    m_samples_available;
-
-    // Module API
-    virtual bool initialize(void) override;
-    virtual void activateInit(void) override;
-    virtual void deactivateCleanup(void) override;
-    virtual bool dtmfDigitReceived(char digit, int duration) override;
-    virtual void dtmfCmdReceived(const std::string& cmd) override;
-    virtual void dtmfCmdReceivedWhenIdle(const std::string &cmd) override;
-    virtual void squelchOpen(bool is_open) override;
-    virtual void allMsgsWritten(void) override;
-
-    // Implementation
     void startRecording(void);
     void stopRecording(void);
     void processAudioRequest(void);
     void sendToAPI(const std::string& audio_file);
-    void playResponseFile(const std::string& filename);
-    void onTimeout(Async::Timer *t);
+    void playResponse(const std::string& response_text);
+    void onTimeout(void);
     void cleanup(void);
     void textToSpeech(const std::string& text, const std::string& output_file);
-    void saveSamplesToFile(const std::vector<float>& samples, const std::string& filename);
-
-
+    
     // HTTP/API helper functions
-#ifdef HAVE_CURL
     static size_t writeCallback(void *contents, size_t size, size_t nmemb, std::string *data);
     bool transcribeAudio(const std::string& audio_file, std::string& transcription);
     bool getChatResponse(const std::string& user_message, std::string& response);
     std::string escapeJson(const std::string& input);
-#endif
-};  /* class ModuleChatGPT */
+};
 
-#endif /* MODULE_CHAT_GPT_INCLUDED */
+#endif // MODULE_CHATGPT_INCLUDED
