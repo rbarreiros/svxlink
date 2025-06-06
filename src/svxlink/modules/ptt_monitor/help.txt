@@ -1,0 +1,2 @@
+The PTT Monitor module is used to prevent the spam of PTT during a determined
+ammount of time.

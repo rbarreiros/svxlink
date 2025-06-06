@@ -1,12 +1,12 @@
-#ifndef MODULE_CHAT_GPT_INCLUDED
-#define MODULE_CHAT_GPT_INCLUDED
+#ifndef MODULE_CHATGPT_INCLUDED
+#define MODULE_CHATGPT_INCLUDED
 
-#include <vector>
-
-#include <AsyncTimer.h>
 #include <Module.h>
-
+#include <AsyncConfig.h>
+#include <AsyncTimer.h>
 #include "version/SVXLINK.h"
+#include <string>
+#include <vector>
 
 class ModuleChatGPT : public Module
 {
@@ -15,17 +15,22 @@ class ModuleChatGPT : public Module
     ~ModuleChatGPT(void);
     const char *compiledForVersion(void) const { return SVXLINK_APP_VERSION; }
 
-    
   protected:
-    virtual void resumeOutput(void);
-    virtual void allSamplesFlushed(void);
-    virtual int writeSamples(const float *samples, int count);
-    virtual void flushSamples(void);
-  
+    void resumeOutput(void);
+    void allSamplesFlushed(void);
+    int writeSamples(const float *samples, int count);
+    void flushSamples(void);
+    bool initialize(void);
+    void activateInit(void);
+    void deactivateCleanup(void);
+    bool dtmfDigitReceived(char digit, int duration);
+    void dtmfCmdReceived(const std::string& cmd);
+    void dtmfCmdReceivedWhenIdle(const std::string& cmd);
+    void squelchOpen(bool is_open);
+    void allMsgsWritten(void);
+
   private:
-    
-    enum State 
-    {
+    enum State {
       STATE_IDLE,
       STATE_LISTENING,
       STATE_PROCESSING,
@@ -48,18 +53,7 @@ class ModuleChatGPT : public Module
     // Audio recording variables
     std::vector<float>      m_recorded_samples;
     bool                    m_samples_available;
-
-    // Module API
-    virtual bool initialize(void) override;
-    virtual void activateInit(void) override;
-    virtual void deactivateCleanup(void) override;
-    virtual bool dtmfDigitReceived(char digit, int duration) override;
-    virtual void dtmfCmdReceived(const std::string& cmd) override;
-    virtual void dtmfCmdReceivedWhenIdle(const std::string &cmd) override;
-    virtual void squelchOpen(bool is_open) override;
-    virtual void allMsgsWritten(void) override;
-
-    // Implementation
+    
     void startRecording(void);
     void stopRecording(void);
     void processAudioRequest(void);
@@ -69,8 +63,7 @@ class ModuleChatGPT : public Module
     void cleanup(void);
     void textToSpeech(const std::string& text, const std::string& output_file);
     void saveSamplesToFile(const std::vector<float>& samples, const std::string& filename);
-
-
+    
     // HTTP/API helper functions
 #ifdef HAVE_CURL
     static size_t writeCallback(void *contents, size_t size, size_t nmemb, std::string *data);
@@ -78,6 +71,6 @@ class ModuleChatGPT : public Module
     bool getChatResponse(const std::string& user_message, std::string& response);
     std::string escapeJson(const std::string& input);
 #endif
-};  /* class ModuleChatGPT */
+};
 
-#endif /* MODULE_CHAT_GPT_INCLUDED */
+#endif // MODULE_CHATGPT_INCLUDED

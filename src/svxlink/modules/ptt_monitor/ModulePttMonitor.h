@@ -52,6 +52,8 @@
  *
  ****************************************************************************/
 
+ #include "version/SVXLINK.h"
+
 /****************************************************************************
  *
  * Forward declarations
@@ -100,51 +102,25 @@ class ModulePttMonitor : public Module
      * @param   name - Module name
      */
     ModulePttMonitor(void *dl_handle, Logic *logic, const std::string& name);
-    
-    /**
-     * @brief   Destructor
-     */
     virtual ~ModulePttMonitor(void);
-    
-    /**
-     * @brief   Initialize the module
-     * @returns Returns \em true on success or else \em false
-     */
-    virtual bool initialize(void);
-    
+    const char *compiledForVersion(void) const { return SVXLINK_APP_VERSION; }
+
   protected:
-    /**
-     * @brief   Called when the module is being activated
-     */
-    virtual void activateInit(void);
-    
-    /**
-     * @brief   Called when the module is being deactivated
-     */
-    virtual void deactivateCleanup(void);
-    
-    /**
-     * @brief   Called when a DTMF digit has been received
-     * @param   digit - The received DTMF digit
-     * @param   duration - The duration of the digit in milliseconds
-     * @returns Return \em true if the digit is handled or else \em false
-     */
-    virtual bool dtmfDigitReceived(char digit, int duration);
-    
-    /**
-     * @brief   Called when a DTMF command has been received
-     * @param   cmd - The received DTMF command
-     */
-    virtual void dtmfCmdReceived(const std::string& cmd);
-    
-    /**
-     * @brief   Called when the squelch opens or closes
-     * @param   is_open - \em true if the squelch is open or else \em false
-     */
-    virtual void squelchOpen(bool is_open);
-    
+    virtual void resumeOutput(void);
+    virtual void allSamplesFlushed(void);
+    virtual int writeSamples(const float *samples, int count);
+    virtual void flushSamples(void);
+
   private:
-    struct PttEvent {
+    bool initialize(void);
+    void activateInit(void);
+    void deactivateCleanup(void);
+    bool dtmfDigitReceived(char digit, int duration);
+    void dtmfCmdReceived(const std::string& cmd);
+    void squelchOpen(bool is_open);
+    
+    struct PttEvent 
+    {
       time_t timestamp;
       bool is_open;
     };

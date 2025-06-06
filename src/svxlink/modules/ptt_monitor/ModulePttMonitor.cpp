@@ -98,6 +98,14 @@ using namespace Async;
  *
  ****************************************************************************/
 
+extern "C" {
+  Module *module_init(void *dl_handle, Logic *logic, const char *cfg_name)
+  {
+    return new ModulePttMonitor(dl_handle, logic, cfg_name);
+  }
+} /* extern "C" */
+
+
 /****************************************************************************
  *
  * Public member functions
@@ -119,6 +127,41 @@ ModulePttMonitor::~ModulePttMonitor(void)
   delete cleanup_timer;
   cout << "ModulePttMonitor: Module " << name() << " destroyed" << endl;
 } /* ModulePttMonitor::~ModulePttMonitor */
+
+/****************************************************************************
+ *
+ * Protected member functions
+ *
+ ****************************************************************************/
+
+void ModulePttMonitor::resumeOutput(void)
+{
+
+} /* ModuleDtmfRepeater::resumeOutput */
+
+
+void ModulePttMonitor::allSamplesFlushed(void)
+{
+
+} /* ModuleDtmfRepeater::allSamplesFlushed */
+
+
+int ModulePttMonitor::writeSamples(const float *samples, int count)
+{
+  return count;
+} /* ModuleDtmfRepeater::writeSamples */
+
+
+void ModulePttMonitor::flushSamples(void)
+{
+  sourceAllSamplesFlushed();
+} /* ModuleDtmfRepeater::flushSamples */
+
+/****************************************************************************
+ *
+ * Private member functions
+ *
+ ****************************************************************************/
 
 bool ModulePttMonitor::initialize(void)
 {
