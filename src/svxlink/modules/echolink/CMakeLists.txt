@@ -1,8 +1,18 @@
+pkg_check_modules (JSONCPP REQUIRED jsoncpp)
+include_directories(${JSONCPP_INCLUDE_DIRS})
+set(LIBS ${LIBS} ${JSONCPP_LIBRARIES})
+
 # The name of the module without the Module prefix
 set(MODNAME EchoLink)
 
 # Module source code
 set(MODSRC QsoImpl.cpp)
+
+# ***
+pkg_check_modules(DBUS dbus-1)
+include_directories(${DBUS_INCLUDE_DIRS})
+set(LIBS ${LIBS} ${DBUS_LIBRARIES} autopatch)
+# ***
 
 # Project libraries to link to
 set(LIBS ${LIBS} echolib)

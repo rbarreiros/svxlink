@@ -40,6 +40,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <vector>
 
 #include <string.h>
+#include <json/json.h>
 
 /****************************************************************************
  *
@@ -342,6 +343,21 @@ bool ModuleEchoLink::initialize(void)
     moduleCleanup();
     return false;
   }
+
+  if (cfg().getValue(cfgName(), "BRIDGE_DEFAULT", value))
+  {
+    bridge.setDefaultConfiguration(value.c_str());
+  }
+  if (cfg().getValue(cfgName(), "BRIDGE_ENCODING", value))
+  {
+    bridge.setEncodingConfiguration(value.c_str());
+  }
+  if (cfg().getValue(cfgName(), "BRIDGE_PROXY", value))
+  {
+    bridge.setProxyConfiguration(value.c_str());
+  }
+
+  bridge.setCallConfiguration(mycall.c_str());
 
     // Initialize directory server communication
   dir = new Directory(servers, mycall, password, location, bind_addr);
@@ -1206,6 +1222,7 @@ void ModuleEchoLink::onChatMsgReceived(QsoImpl *qso, const string& msg)
   ss << "chat_received [subst -nocommands -novariables {";
   ss << escaped;
   ss << "}]";
+  bridge.handleChatMessage(escaped.c_str());
   processEvent(ss.str());
 } /* onChatMsgReceived */
 
@@ -1532,6 +1549,7 @@ void ModuleEchoLink::broadcastTalkerStatus(void)
 
   if (squelch_is_open && listen_only_valve->isOpen())
   {
+    const char* sysop_name = bridge.getTalker();
     msg << "> " << mycall << "         " << sysop_name << "\n\n";
   }
   else
@@ -1540,6 +1558,7 @@ void ModuleEchoLink::broadcastTalkerStatus(void)
     {
       msg << "> " << talker->remoteCallsign() << "         "
       	  << talker->remoteName() << "\n\n";
+      bridge.setTalker(talker->remoteCallsign().c_str(), talker->remoteName().c_str());
     }
     msg << mycall << "         ";
     if (!listen_only_valve->isOpen())
@@ -1567,7 +1586,29 @@ void ModuleEchoLink::broadcastTalkerStatus(void)
   {
     (*it)->sendInfoData(msg.str());
   }
-  
+
+  // info to the logic connected
+  if (talker != 0)
+  {
+    uint32_t ti = time(0);
+    Json::Value talkerstate(Json::objectValue);
+    talkerstate["name"] = talker->remoteName();
+    talkerstate["callsign"] = talker->remoteCallsign();
+    talkerstate["mode"] = "EchoLink";
+    talkerstate["idtype"] = "EL-ID";
+    talkerstate["tsi"] = talker->stationData().id();
+    talkerstate["comment"] = talker->stationData().description();
+    talkerstate["last_activity"] = ti;
+
+    Json::StreamWriterBuilder builder;
+    builder["commentStyle"] = "None";
+    builder["indentation"] = ""; //The JSON document is written on a single line
+    Json::StreamWriter* writer = builder.newStreamWriter();
+    stringstream os;
+    writer->write(talkerstate, &os);
+    delete writer;
+    publishStateEvent("Qso:info", os.str());
+  }
 } /* ModuleEchoLink::broadcastTalkerStatus */
 
 

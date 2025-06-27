@@ -522,6 +522,7 @@ bool LocalRxBase::initialize(void)
   prev_src->registerSink(tone_dets, true);
   prev_src = tone_dets;
 
+#if 0
     // Filter out the voice band, removing high- and subaudible frequencies,
     // for example CTCSS.
 #if (INTERNAL_SAMPLE_RATE == 16000)
@@ -531,6 +532,7 @@ bool LocalRxBase::initialize(void)
 #endif
   prev_src->registerSink(voiceband_filter, true);
   prev_src = voiceband_filter;
+#endif
 
     // Create an audio splitter to distribute the voiceband audio to all
     // other consumers
@@ -807,6 +809,13 @@ void LocalRxBase::unregisterFullbandSink(Async::AudioSink* sink)
 {
   fullband_splitter->removeSink(sink);
 } /* LocalRxBase::unregisterFullbandSink */
+
+
+void LocalRxBase::setSql(bool is_open)
+{
+  squelch_det->squelchOpen(is_open);
+} /* LocalRxBase::setSql */
+
 
 
 /****************************************************************************

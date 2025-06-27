@@ -374,6 +374,265 @@ bool Reflector::initialize(Async::Config &cfg)
 } /* Reflector::initialize */
 
 
+void Reflector::updateUserdata(Json::Value user_arr)
+{
+  User m_user;
+  for (Json::Value::ArrayIndex i = 0; i != user_arr.size(); i++)
+  {
+    Json::Value& t_userdata = user_arr[i];
+    m_user.id = t_userdata.get("id", "").asString();
+    m_user.name = t_userdata.get("name","").asString();
+    m_user.idtype = t_userdata.get("idtype","").asString();
+    m_user.mode = t_userdata.get("mode","").asString();
+    m_user.call = t_userdata.get("call","").asString();
+    m_user.location = t_userdata.get("location","").asString();
+    m_user.aprs_sym = static_cast<char>(t_userdata.get("sym",0).asInt());
+    m_user.aprs_tab = static_cast<char>(t_userdata.get("tab",0).asInt());
+    m_user.comment = t_userdata.get("comment","").asString();
+    m_user.registered = t_userdata.get("registered",true).asBool();
+    if (t_userdata.get("last_activity",0).asUInt() > 0)
+    {
+      m_user.last_activity = (time_t) t_userdata.get("last_activity",0).asUInt();
+    }
+
+    std::map<std::string, User>::iterator iu;
+    iu = userdata.find(m_user.id);
+    if (iu != userdata.end())
+    {
+      iu->second.name= m_user.name;
+      iu->second.mode= m_user.mode;
+      iu->second.idtype= m_user.idtype;
+      iu->second.aprs_sym = m_user.aprs_sym;
+      iu->second.aprs_tab = m_user.aprs_tab;
+      iu->second.comment = m_user.comment;
+      iu->second.location = m_user.location;
+      iu->second.registered = m_user.registered;
+      if (m_user.last_activity)
+      {
+        iu->second.last_activity = m_user.last_activity;
+      }
+
+      if (debug)
+      {
+        cout << "+++ updateUserdata: UPDATE call=" << m_user.call << ", issi="
+             << m_user.id << ", name=" << m_user.name << ", location="
+             << m_user.location << " (" << m_user.comment << ")" << endl;
+      }
+    }
+    else
+    {
+      userdata.insert(std::pair<std::string, User>(m_user.id, m_user));
+      if (debug)
+      {
+        cout << "+++ updateUserdata: NEW call=" << m_user.call << ", issi="
+             << m_user.id << ", name=" << m_user.name << ", location="
+             << m_user.location << " ("   << m_user.comment << ")" << endl;
+      }
+    }
+  }
+
+  writeUserData();
+} /* Reflector::updateUserdata */
+
+
+void Reflector::updateSdsdata(Json::Value eventmessage)
+{
+  std::string s = eventmessage.get("source","").asString();
+
+  if (s.size() < 4) return;
+
+  std::map<std::string, Json::Value>::iterator it = sdsStateMap.find(s);
+  if (it != sdsStateMap.end())
+  {
+    it->second.append(eventmessage);
+    if (it->second.size() > 14)  // >=14
+    {
+      Json::Value jv;
+      for (auto a=1; a<16; a++)  // <15
+      {
+        jv.append(it->second[a]);
+      }
+      sdsStateMap[s] = jv;
+    }
+  }
+  else
+  {
+    sdsStateMap[s][0] = eventmessage;
+  }
+
+  if (debug) cout << "+++ updateSdsdata:" << jsonToString(eventmessage) << endl;
+} /* Reflector::updateSdsdata */
+
+
+void Reflector::updateQsostate(Json::Value eventmessage)
+{
+  std::string s = eventmessage.get("source","").asString();
+
+  if (s.size() < 4) return;
+
+  std::map<std::string, Json::Value>::iterator it = qsoStateMap.find(s);
+  if (it != qsoStateMap.end())
+  {
+    it->second.append(eventmessage);
+    if (it->second.size() > 14)  // store the last 15 qso's
+    {
+      Json::Value jv;
+      for (auto a =1;a<16;a++)
+      {
+        jv.append(it->second[a]);
+      }
+      qsoStateMap[s] = jv;
+    }
+  }
+  else
+  {
+    qsoStateMap[s][0] = eventmessage;
+  }
+
+  if (debug) cout << "+++ updateQsodata:" << jsonToString(eventmessage) << endl;
+} /* Reflector::updateQsostate */
+
+
+void Reflector::updateRssistate(Json::Value eventmessage)
+{
+  std::string s = eventmessage.get("source","").asString();
+  rssiStateMap[s] = eventmessage;
+  if (debug) cout << "+++ updateRssidata:" << jsonToString(eventmessage) << endl;
+} /* Reflector::updateRssistate */
+
+
+void Reflector::updateSysteminfostate(Json::Value eventmessage)
+{
+  std::string s = eventmessage.get("source","").asString();
+  systemStateMap[s] = eventmessage;
+  if (debug) cout << jsonToString(eventmessage) << endl;
+  writeUserData();
+} /* Reflector::updateSysteminfostate */
+
+
+void Reflector::updateRegisterstate(Json::Value eventmessage)
+{
+  std::string s = eventmessage.get("source","").asString();  // Reflectorcall
+  Json::Value js = eventmessage["data"];
+  if (js.empty())
+  {
+    if (debug) cout << "*** updateRegisterstate:[data] of " << s
+                    << " is empty, returning" << endl;
+    return;
+  }
+  std::map<std::string, Json::Value>::iterator it = registerStateMap.find(s);
+
+  if (it != registerStateMap.end())
+  {
+    if (it->first == s)
+    {
+      it->second = js;
+    }
+  }
+  else
+  {
+    cout << "+++ updateRegisterstate: new entry s=" << jsonToString(js) << endl;
+    registerStateMap[s] = js;
+  }
+
+  // scan in the new Json::Array and update userdata
+  it = registerStateMap.find(s);
+
+  Json::Value t_userdata(Json::arrayValue);
+  t_userdata = it->second;
+
+  std::map<std::string, User>::iterator iu;
+
+  // scan the userdata dataset and update the last activitys and changes
+  for (iu = userdata.begin(); iu != userdata.end(); iu++)
+  {
+    for (auto a=0; a<(int)t_userdata.size(); a++)
+    {
+      if (iu->second.call == t_userdata[a].get("call","").asString())
+      {
+        iu->second.last_activity = t_userdata[a].get("last_activity",0).asUInt();
+        iu->second.aprs_tab = static_cast<char>(t_userdata[a].get("tab",0).asInt());
+        iu->second.aprs_sym = static_cast<char>(t_userdata[a].get("sym",0).asInt());
+        iu->second.lat = t_userdata[a].get("lat",0).asFloat();
+        iu->second.lon = t_userdata[a].get("lon",0).asFloat();
+        iu->second.registered = t_userdata[a].get("registered",true).asBool();
+        iu->second.comment = t_userdata[a].get("comment","").asString();
+        iu->second.gateway = s;
+        cout << "+++ updateRegisterstate: " << iu->second.call << " via gw " << s
+             << ", registration is " << (iu->second.registered ? "TRUE" : "FALSE")
+             << endl;
+      }
+    }
+  }
+
+  if (debug) cout << jsonToString(eventmessage) << endl;
+} /* Reflector::updateSysteminfostate */
+
+
+void Reflector::forwardSds(Json::Value eventmessage)
+{
+  std::string source_call = eventmessage.get("source","").asString();
+  std::string dest_call = eventmessage.get("dest_callsign","").asString();
+  std::string gateway = eventmessage.get("gateway",source_call).asString();
+  std::string msg = jsonToString(eventmessage);
+
+  if (source_call == "NoCall" || dest_call == "NoCall" || gateway == "NoCall")
+  {
+    cout << "*** forwardSds: No valid callsign given (NoCall)." << endl;
+    return;
+  }
+
+  // scan the userdata dataset and look for the last activity
+  std::map<std::string, User>::iterator iu;
+
+  for (iu = userdata.begin(); iu != userdata.end(); iu++)
+  {
+    if (iu->second.call == dest_call && iu->second.registered)
+    {
+      // send eventmessage to gateway
+      for (const auto& item : m_client_con_map)
+      {
+        ReflectorClient *client = item.second;
+        if (client->conState() == ReflectorClient::STATE_CONNECTED &&
+           client->callsign() == gateway && v2_client_filter(client))
+        {
+          if (debug)
+          {
+            cout << ">>> forwardSds: " << source_call << "->"
+                 << client->callsign() << "->" << gateway << "->" << dest_call
+                 << endl;
+          }
+          client->sendMsg(MsgStateEvent("Reflector", "ForwardSds:info", msg));
+        }
+      }
+    }
+  }
+  cout << jsonToString(eventmessage) << endl;
+} /* Reflector::forwardSds */
+
+
+void Reflector::forwardEventState(ReflectorClient* origin, const std::string& name,
+                           Json::Value& message, bool broadcast)
+{
+  MsgStateEvent event = MsgStateEvent("Reflector", name, jsonToString(message));
+  uint32_t group = TGHandler::instance()->TGForClient(origin);
+
+  for (const auto& item : m_client_con_map)
+  {
+    ReflectorClient* client = item.second;
+    if ((client != origin) &&
+        (client->conState() == ReflectorClient::STATE_CONNECTED) &&
+        ((broadcast) ||
+        (client->currentTG() == group) ||
+        (client->monitoredTGs().find(group) != client->monitoredTGs().end())))
+    {
+      // Forward event state to all nodes except origin
+      client->sendMsg(event);
+    }
+  }
+} /* Reflector::forwardEventState */
+
+
 void Reflector::nodeList(std::vector<std::string>& nodes) const
 {
   nodes.clear();
@@ -1348,6 +1607,12 @@ void Reflector::httpRequestReceived(Async::HttpServerConnection *con,
     node["monitoredTGs"] = tgs;
     bool is_talker = TGHandler::instance()->talkerForTG(tg) == client;
     node["isTalker"] = is_talker;
+
+    node["Rssi::info"] = rssiStateMap[client->callsign()];
+    node["Qso::info"] = qsoStateMap[client->callsign()];
+    node["Sds::info"] = sdsStateMap[client->callsign()];
+    node["System::info"] = systemStateMap[client->callsign()];
+    node["Register::info"] = registerStateMap[client->callsign()];
 
     if (node.isMember("qth") && node["qth"].isArray())
     {

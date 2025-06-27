@@ -38,6 +38,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <cerrno>
 #include <ctime>
 #include <iterator>
+#include <fstream>
+#include <iostream>
 
 
 /****************************************************************************
@@ -237,6 +239,7 @@ ReflectorClient::ReflectorClient(Reflector *ref, Async::FramedTcpConnection *con
     }
     m_supported_codecs.push_back(codec);
   }
+
 } /* ReflectorClient::ReflectorClient */
 
 
@@ -1010,11 +1013,63 @@ void ReflectorClient::handleStateEvent(std::istream& is)
     sendError("Illegal MsgStateEvent protocol message received");
     return;
   }
-  cout << "### ReflectorClient::handleStateEvent:"
-       << " src=" << msg.src()
-       << " name=" << msg.name()
-       << " msg=" << msg.msg()
-       << std::endl;
+//  cout << "### ReflectorClient::handleStateEvent:"
+//       << " src=" << m_callsign
+//       << " name=" << msg.name()
+//       << " msg=" << msg.msg()
+//       << std::endl;
+
+  Json::Value eventmessage;
+  Json::Reader reader;
+  Json::Value em;
+  bool b = reader.parse(msg.msg(), eventmessage);
+  if (!b)
+  {
+    cout << "*** Error: parsing StateEvent message (" 
+         << reader.getFormattedErrorMessages() << ")" << endl;
+    return;
+  }
+
+  if (msg.name() == "TetraUsers:info")
+  {
+    m_reflector->updateUserdata(eventmessage);
+  }
+  else if (msg.name() == "Sds:info")
+  {
+    (eventmessage.isArray() ? em = eventmessage[0] : em = eventmessage);
+    em["source"] = m_callsign;
+    m_reflector->updateSdsdata(em);
+  }
+  else if (msg.name() == "Qso:info")
+  {
+    (eventmessage.isArray() ? em = eventmessage[0] : em = eventmessage);
+    em["source"] = m_callsign;
+    em["tg"] = m_current_tg;
+    m_reflector->updateQsostate(em);
+    m_reflector->forwardEventState(this, msg.name(), eventmessage, false);
+  }
+  else if (msg.name() == "Rssi:info")
+  {
+    eventmessage["source"] = m_callsign;
+    m_reflector->updateRssistate(eventmessage);
+  }
+  else if (msg.name() == "System:info")
+  {
+    eventmessage["source"] = m_callsign;
+    m_reflector->updateSysteminfostate(eventmessage);
+  }
+  else if (msg.name() == "Register:info")
+  {
+    em["source"] = m_callsign;
+    em["data"] = eventmessage;
+    m_reflector->updateRegisterstate(em);
+    m_reflector->forwardEventState(this, msg.name(), eventmessage, true);
+  }
+  else if (msg.name() == "ForwardSds:info")
+  {
+    eventmessage["source"] = m_callsign;
+    m_reflector->forwardSds(eventmessage);
+  }
 } /* ReflectorClient::handleStateEvent */
 
 

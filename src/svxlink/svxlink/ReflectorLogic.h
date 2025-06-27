@@ -347,7 +347,6 @@ class ReflectorLogic : public LogicBase
     void handlePlayDtmf(const std::string& digit, int amp, int duration);
     bool loadClientCertificate(void);
     void csrAddSubjectNamesFromConfig(void);
-
 };  /* class ReflectorLogic */
 
 

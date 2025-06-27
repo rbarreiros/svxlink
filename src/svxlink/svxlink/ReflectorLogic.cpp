@@ -811,13 +811,12 @@ void ReflectorLogic::remoteReceivedTgUpdated(LogicBase *logic, uint32_t tg)
 void ReflectorLogic::remoteReceivedPublishStateEvent(
     LogicBase *logic, const std::string& event_name, const std::string& data)
 {
-  //cout << "### ReflectorLogic::remoteReceivedPublishStateEvent:"
-  //     << " logic=" << logic->name()
-  //     << " event_name=" << event_name
-  //     << " data=" << data
-  //     << endl;
+  cout << "### ReflectorLogic::remoteReceivedPublishStateEvent:"
+       << " logic=" << logic->name()
+       << " event_name=" << event_name
+       << " data=" << data
+       << endl;
   //sendMsg(MsgStateEvent(logic->name(), event_name, msg));
-
   if (event_name == "Voter:sql_state")
   {
     //MsgUdpSignalStrengthValues msg;
@@ -922,6 +921,25 @@ void ReflectorLogic::remoteReceivedPublishStateEvent(
         msg.pushBack(tx);
       }
     }
+    sendMsg(msg);
+  }
+  else if (event_name == "QsoInfo:state")
+  {
+    std::istringstream is(data);
+    Json::Value user_info;
+    is >> user_info;
+    user_info["TG"] = m_selected_tg;
+    string ud = jsonToString(user_info);
+
+    MsgStateEvent msg(logic->name(), event_name, ud);
+    sendMsg(msg);
+  }
+  else if (event_name == "Sds:info" || event_name == "DvUsers:info" ||
+           event_name == "Rssi:info" || event_name == "System:info" ||
+           event_name == "Qso:info" || event_name == "Register:info" ||
+           event_name == "ForwardSds:info")
+  {
+    MsgStateEvent msg(logic->name(), event_name, data);
     sendMsg(msg);
   }
 } /* ReflectorLogic::remoteReceivedPublishStateEvent */
@@ -1882,6 +1900,11 @@ void ReflectorLogic::handleMsgTalkerStart(std::istream& is)
   std::ostringstream ss;
   ss << "talker_start " << msg.tg() << " " << msg.callsign();
   processEvent(ss.str());
+
+  Json::Value event(Json::objectValue);
+  event["tg"] = msg.tg();
+  event["callsign"] = msg.callsign();
+  publishStateEvent("Reflector:talker_start", jsonToString(event));
 } /* ReflectorLogic::handleMsgTalkerStart */
 
 
@@ -2698,7 +2721,6 @@ void ReflectorLogic::csrAddSubjectNamesFromConfig(void)
     }
   }
 } /* ReflectorLogic::csrAddSubjectName */
-
 
 /*
  * This file has not been truncated

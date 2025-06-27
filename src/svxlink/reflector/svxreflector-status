@@ -8,7 +8,7 @@ import traceback
 from collections import defaultdict
 
 # API endpoint
-URL = "http://localhost:8080/status"
+URL = "http://localhost:8181/status"
 if len(sys.argv) > 1:
     URL = sys.argv[1]
 

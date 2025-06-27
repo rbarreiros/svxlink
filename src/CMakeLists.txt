@@ -63,11 +63,13 @@ include_directories(
 if(CMAKE_COMPILER_IS_GNUCC OR CMAKE_COMPILER_IS_GNUCXX)
   set(CMAKE_C_FLAGS
     "${CMAKE_C_FLAGS} -Wall -Wstrict-prototypes -Wpointer-arith")
+  set(CMAKE_C_FLAGS_DEBUG "-O0")
   set(CMAKE_C_FLAGS_RELEASE "-O3")
   set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O2 -g")
 
   set(CMAKE_CXX_FLAGS
-    "${CMAKE_CXX_FLAGS} -Wall -Wpointer-arith")
+    "${CMAKE_CXX_FLAGS} -Wall -Wpointer-arith -fPIC")
+  set(CMAKE_CXX_FLAGS_RELEASE "-O0")
   set(CMAKE_CXX_FLAGS_RELEASE "-O3")
   set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
 
@@ -337,6 +339,8 @@ add_subdirectory(svxlink)
 if(USE_QT)
   add_subdirectory(qtel)
 endif(USE_QT)
+
+add_subdirectory(autopatch)
 
 # Experimental CPack package building
 set(CPACK_SET_DESTDIR "ON")
