@@ -36,6 +36,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <fstream>
 #include <iterator>
 #include <regex>
+#include <functional>
+#include <cstring>
 
 
 /****************************************************************************
@@ -231,6 +233,9 @@ Reflector::Reflector(void)
     m_random_qsy_hi(0), m_random_qsy_tg(0), m_http_server(0), m_cmd_pty(0),
     m_keys_dir("private/"), m_pending_csrs_dir("pending_csrs/"),
     m_csrs_dir("csrs/"), m_certs_dir("certs/"), m_pki_dir("pki/")
+#ifdef HAVE_MQTT
+    , m_mqtt_heartbeat_timer(MQTT_HEARTBEAT_INTERVAL, Async::Timer::TYPE_PERIODIC), m_start_time(time(NULL))
+#endif
 {
   TGHandler::instance()->talkerUpdated.connect(
       mem_fun(*this, &Reflector::onTalkerUpdated));
@@ -254,6 +259,14 @@ Reflector::Reflector(void)
                     << std::endl;
         }
       });
+#ifdef HAVE_MQTT
+  m_mqtt_heartbeat_timer.expired.connect(
+      [&](Async::Timer*)
+      {
+        publishMqttHeartbeat();
+      });
+#endif
+  
   m_status["nodes"] = Json::Value(Json::objectValue);
 } /* Reflector::Reflector */
 
@@ -294,6 +307,16 @@ bool Reflector::initialize(Async::Config &cfg)
   }
 
   m_srv->setSslContext(m_ssl_ctx);
+
+#ifdef HAVE_MQTT
+  // Initialize MQTT after certificates are loaded/created
+  // because we use the server certificate to generate our mqtt client ID
+  // bear in mind that if the server certificate changes, so does our id
+  if (!initMqtt())
+  {
+    std::cerr << "*** WARNING: MQTT initialization failed, continuing without MQTT support" << std::endl;
+  }
+#endif
 
   uint16_t udp_listen_port = 5300;
   cfg.getValue("GLOBAL", "LISTEN_PORT", udp_listen_port);
@@ -852,6 +875,19 @@ void Reflector::clientConnected(Async::FramedTcpConnection *con)
   ReflectorClient *client = new ReflectorClient(this, con, m_cfg);
   con->verifyPeer.connect(sigc::mem_fun(*this, &Reflector::onVerifyPeer));
   m_client_con_map[con] = client;
+
+#ifdef HAVE_MQTT
+  if (m_mqtt_handler && m_mqtt_handler->isConnected())
+  {
+      // Publish node connect event
+      Json::Value client_data;
+      client_data["host"] = con->remoteHost().toString();
+      client_data["port"] = con->remotePort();
+      
+      Json::FastWriter writer;
+      m_mqtt_handler->publishNodeEvent("connect", "", writer.write(client_data));
+  }
+#endif
 } /* Reflector::clientConnected */
 
 
@@ -884,7 +920,24 @@ void Reflector::clientDisconnected(Async::FramedTcpConnection *con,
         ReflectorClient::ExceptFilter(client));
   }
   //Application::app().runTask([=]{ delete client; });
+
+#ifdef HAVE_MQTT
+  if (m_mqtt_handler && m_mqtt_handler->isConnected())
+  {
+      // Publish node disconnect event
+      Json::Value client_data;
+      client_data["host"] = con->remoteHost().toString();
+      client_data["port"] = con->remotePort();
+      client_data["reason"] = TcpConnection::disconnectReasonStr(reason);
+      client_data["callsign"] = client->callsign();
+      
+      Json::FastWriter writer;
+      m_mqtt_handler->publishNodeEvent("disconnect", "", writer.write(client_data));
+  }
+#endif
+
   delete client;
+
 } /* Reflector::clientDisconnected */
 
 
@@ -1362,6 +1415,11 @@ void Reflector::httpRequestReceived(Async::HttpServerConnection *con,
   res.setSendContent(req.method == "GET");
   res.setCode(200);
   con->write(res);
+
+#ifdef HAVE_MQTT
+  // Also publish status to MQTT
+  publishStatusToMqtt();
+#endif
 } /* Reflector::requestReceived */
 
 
@@ -2258,7 +2316,330 @@ void Reflector::runCAHook(const Async::Exec::Environment& env)
 } /* Reflector::runCAHook */
 
 
+#ifdef HAVE_MQTT
+
+// MQTT integration methods
+bool Reflector::initMqtt()
+{
+    // Check if MQTT is enabled
+    m_mqtt_enabled = false;
+    m_cfg->getValue("GLOBAL", "MQTT_ENABLED", m_mqtt_enabled);
+    
+    if (!m_mqtt_enabled)
+    {
+        std::cout << "MQTT is disabled in configuration" << std::endl;
+        return false;
+    }
+    
+    // Read MQTT configuration
+    if (!m_cfg->getValue("GLOBAL", "MQTT_BROKER_HOST", m_mqtt_broker_host) ||
+        !m_cfg->getValue("GLOBAL", "MQTT_BROKER_PORT", m_mqtt_broker_port) ||
+        !m_cfg->getValue("GLOBAL", "MQTT_USERNAME", m_mqtt_username) ||
+        !m_cfg->getValue("GLOBAL", "MQTT_PASSWORD", m_mqtt_password))
+    {
+        std::cout << "MQTT configuration incomplete, MQTT support disabled" << std::endl;
+        return false;
+    }
+    
+    // Read MQTT topic prefix 
+    m_mqtt_topic_prefix = "";
+    m_cfg->getValue("GLOBAL", "MQTT_TOPIC_PREFIX", m_mqtt_topic_prefix);
+    
+    // Generate unique client ID from server certificate
+    std::string client_id = generateMqttClientId();
+    if (client_id.empty())
+    {
+        std::cerr << "*** ERROR: Could not generate MQTT client ID from certificate" << std::endl;
+        return false;
+    }
+    
+    // Create MQTT handler
+    m_mqtt_handler = std::unique_ptr<MqttHandler>(new MqttHandler(this));
+    
+    // Set command callback
+    m_mqtt_handler->setCommandCallback([this](const std::string& command) {
+        this->handleMqttCommand(command);
+    });
+    
+    // Initialize MQTT connection
+    if (!m_mqtt_handler->init(m_mqtt_broker_host, m_mqtt_broker_port,
+                             m_mqtt_username, m_mqtt_password,
+                             client_id, m_mqtt_topic_prefix))
+    {
+        return false;
+    }
+    
+    // Great, we're connected, let's publish our first heartbeat
+    publishMqttHeartbeat();
+    
+    return true;
+}
+
+void Reflector::handleMqttCommand(const std::string& command)
+{
+    // Parse and execute command (similar to PTY command handling)
+    std::istringstream ss(command);
+    std::ostringstream response;
+    std::string cmd;
+    
+    if (!(ss >> cmd))
+    {
+        response << "ERR:Invalid MQTT command '" << command << "'";
+        sendMqttReply(response.str());
+        return;
+    }
+    
+    std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::toupper);
+
+    if (cmd == "CFG")
+    {
+        std::string section, tag, value;
+        ss >> section >> tag >> value;
+        if (!value.empty())
+        {
+            m_cfg->setValue(section, tag, value);
+            response << "OK:Configuration updated " << section << "/" << tag << "=\"" << value << "\"";
+        }
+        else if (!tag.empty())
+        {
+            std::string current_value = m_cfg->getValue(section, tag);
+            response << "OK:" << section << "/" << tag << "=\"" << current_value << "\"";
+        }
+        else if (!section.empty())
+        {
+            response << "OK:Configuration for section [" << section << "]:";
+            for (const auto& tag_name : m_cfg->listSection(section))
+            {
+                response << "\n  " << section << "/" << tag_name << "=\"" 
+                        << m_cfg->getValue(section, tag_name) << "\"";
+            }
+        }
+        else
+        {
+            response << "OK:All configuration:";
+            for (const auto& section_name : m_cfg->listSections())
+            {
+                for (const auto& tag_name : m_cfg->listSection(section_name))
+                {
+                    response << "\n  " << section_name << "/" << tag_name << "=\"" 
+                            << m_cfg->getValue(section_name, tag_name) << "\"";
+                }
+            }
+        }
+    }
+    else if (cmd == "NODE")
+    {
+        std::string subcmd, callsign;
+        unsigned blocktime;
+        if (!(ss >> subcmd >> callsign >> blocktime))
+        {
+            response << "ERR:Invalid NODE MQTT command '" << command << "'. "
+                     << "Usage: NODE BLOCK <callsign> <blocktime seconds>";
+            sendMqttReply(response.str());
+            return;
+        }
+        std::transform(subcmd.begin(), subcmd.end(), subcmd.begin(), ::toupper);
+        if (subcmd == "BLOCK")
+        {
+            auto node = ReflectorClient::lookup(callsign);
+            if (node == nullptr)
+            {
+                response << "ERR:Could not find node " << callsign;
+            }
+            else
+            {
+                node->setBlock(blocktime);
+                response << "OK:Node " << callsign << " blocked for " << blocktime << " seconds";
+            }
+        }
+        else
+        {
+            response << "ERR:Invalid NODE MQTT command '" << command << "'. "
+                     << "Usage: NODE BLOCK <callsign> <blocktime seconds>";
+        }
+    }
+    else if (cmd == "CA")
+    {
+        std::string subcmd;
+        if (!(ss >> subcmd))
+        {
+            response << "ERR:Invalid CA MQTT command '" << command << "'. "
+                     << "Usage: CA PENDING|SIGN <callsign>|LS|RM <callsign>";
+            sendMqttReply(response.str());
+            return;
+        }
+        std::transform(subcmd.begin(), subcmd.end(), subcmd.begin(), ::toupper);
+        if (subcmd == "SIGN")
+        {
+            std::string cn;
+            if (!(ss >> cn))
+            {
+                response << "ERR:Invalid CA SIGN MQTT command '" << command << "'. "
+                         << "Usage: CA SIGN <callsign>";
+                sendMqttReply(response.str());
+                return;
+            }
+            auto cert = signClientCsr(cn);
+            if (!cert.isNull())
+            {
+                response << "OK:Certificate signed for " << cn;
+            }
+            else
+            {
+                response << "ERR:Certificate signing failed for " << cn;
+            }
+        }
+        else if (subcmd == "RM")
+        {
+            std::string cn;
+            if (!(ss >> cn))
+            {
+                response << "ERR:Invalid CA RM MQTT command '" << command << "'. "
+                         << "Usage: CA RM <callsign>";
+                sendMqttReply(response.str());
+                return;
+            }
+            if (removeClientCert(cn))
+            {
+                response << "OK:Removed client certificate and CSR for " << cn;
+            }
+            else
+            {
+                response << "ERR:Failed to remove certificate and CSR for " << cn;
+            }
+        }
+        else if (subcmd == "LS")
+        {
+            response << "ERR:CA LS command not yet implemented";
+        }
+        else if (subcmd == "PENDING")
+        {
+            response << "ERR:CA PENDING command not yet implemented";
+        }
+        else
+        {
+            response << "ERR:Invalid CA MQTT command '" << command << "'. "
+                     << "Usage: CA PENDING|SIGN <callsign>|LS|RM <callsign>";
+        }
+    }
+    else if (cmd == "STATUS")
+    {
+        publishStatusToMqtt();
+        response << "OK:Status published to MQTT";
+    }
+    else if (cmd == "HELP")
+    {
+        response << "OK:Available MQTT commands:\n"
+                 << "  CFG [<section>] [<tag>] [<value>] - Configuration management\n"
+                 << "  NODE BLOCK <callsign> <seconds> - Block a node\n"
+                 << "  CA SIGN <callsign> - Sign a certificate\n"
+                 << "  CA RM <callsign> - Remove a certificate\n"
+                 << "  STATUS - Publish current status to MQTT\n"
+                 << "  HELP - Show this help";
+    }
+    else
+    {
+        response << "ERR:Unknown MQTT command '" << command 
+                 << "'. Use HELP for available commands";
+    }
+
+    sendMqttReply(response.str());
+}
+
+void Reflector::publishStatusToMqtt()
+{
+    if (m_mqtt_handler && m_mqtt_handler->isConnected())
+    {
+        // Convert current status to JSON string
+        Json::FastWriter writer;
+        std::string status_json = writer.write(m_status);
+        m_mqtt_handler->publishStatus(status_json);
+    }
+}
+
+void Reflector::sendMqttReply(const std::string& reply)
+{
+    if (m_mqtt_handler && m_mqtt_handler->isConnected())
+    {
+        // Publish reply
+        m_mqtt_handler->publishSystemEvent("command_reply", reply);
+    }
+}
+
+void Reflector::publishMqttHeartbeat()
+{
+    // Log timestamp to debug heartbeat frequency
+    time_t now = time(NULL);
+    
+    if (m_mqtt_handler && m_mqtt_handler->isConnected()) {
+        int uptime = static_cast<int>(now - m_start_time);
+        m_mqtt_handler->publishHeartbeat(uptime);
+    }
+}
+
+// This might be thought of a bit better, maybe a hash from the public key ?
+// I don't know, for now it's good enough
+std::string Reflector::generateMqttClientId() const
+{
+    // Try to get the server certificate first
+    if (!m_crtfile.empty())
+    {
+        Async::SslX509 cert;
+        if (cert.readPemFile(m_crtfile) && !cert.isNull())
+        {
+            // Use certificate CN with validity dates for uniqueness
+            std::string cn = cert.commonName();
+            if (!cn.empty())
+            {
+                std::hash<std::string> hasher;
+                size_t hash = hasher(cn + std::to_string(cert.notBefore()) + std::to_string(cert.notAfter()));
+                std::string client_id = "reflector_" + std::to_string(hash);
+                std::cout << "Using certificate CN hash '" << client_id << "' as MQTT client ID" << std::endl;
+                return client_id;
+            }
+            
+            // Fallback: use certificate CN only
+            if (!cn.empty())
+            {
+                std::hash<std::string> hasher;
+                size_t hash = hasher(cn);
+                std::string client_id = "reflector_" + std::to_string(hash);
+                std::cout << "Using certificate CN only hash '" << client_id << "' as MQTT client ID" << std::endl;
+                return client_id;
+            }
+        }
+    }
+    
+    // Last resort: generate a hash-based ID from the certificate file path and hostname
+    if (!m_crtfile.empty())
+    {
+        // Get hostname for additional uniqueness
+        char hostname[256];
+        if (gethostname(hostname, sizeof(hostname)) == 0)
+        {
+            std::hash<std::string> hasher;
+            size_t hash = hasher(m_crtfile + std::string(hostname));
+            std::string client_id = "reflector_" + std::to_string(hash);
+            std::cout << "Using hostname+path hash '" << client_id << "' as MQTT client ID" << std::endl;
+            return client_id;
+        }
+        else
+        {
+            // Just use certificate file path hash
+            std::hash<std::string> hasher;
+            size_t hash = hasher(m_crtfile);
+            std::string client_id = "reflector_" + std::to_string(hash);
+            std::cout << "Using path hash '" << client_id << "' as MQTT client ID" << std::endl;
+            return client_id;
+        }
+    }
+    
+    std::cerr << "*** ERROR: Could not generate MQTT client ID - no certificate available" << std::endl;
+    return "";
+}
+
+#endif
+
 /*
  * This file has not been truncated
  */
-
