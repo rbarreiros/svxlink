@@ -260,13 +260,6 @@ Reflector::Reflector(void)
                     << std::endl;
         }
       });
-#ifdef HAVE_MQTT
-  m_mqtt_heartbeat_timer.expired.connect(
-      [&](Async::Timer*)
-      {
-        publishMqttHeartbeat();
-      });
-#endif
   
   m_status["nodes"] = Json::Value(Json::objectValue);
 } /* Reflector::Reflector */
@@ -319,12 +312,23 @@ bool Reflector::initialize(Async::Config &cfg)
   {
     std::cerr << "*** WARNING: MQTT initialization failed." << std::endl;
   }
+
+  // Only start the heartbeat timer if MQTT is enabled
+  // since the heartbear also checks if the connection is alive
+  if(m_mqtt_enabled) {
+    m_mqtt_heartbeat_timer.expired.connect(
+      [&](Async::Timer*)
+      {
+        publishMqttHeartbeat();
+      });
+  }
 #endif
 
   uint16_t udp_listen_port = 5300;
   cfg.getValue("GLOBAL", "LISTEN_PORT", udp_listen_port);
   m_udp_sock = new Async::EncryptedUdpSocket(udp_listen_port);
   const char* err = "unknown reason";
+
   if ((err="bad allocation",          (m_udp_sock == 0)) ||
       (err="initialization failure",  !m_udp_sock->initOk()) ||
       (err="unsupported cipher",      !m_udp_sock->setCipher(UdpCipher::NAME)))
@@ -333,8 +337,10 @@ bool Reflector::initialize(Async::Config &cfg)
               << err << std::endl;
     return false;
   }
+
   m_udp_sock->setCipherAADLength(UdpCipher::AADLEN);
   m_udp_sock->setTagLength(UdpCipher::TAGLEN);
+  
   m_udp_sock->cipherDataReceived.connect(
       mem_fun(*this, &Reflector::udpCipherDataReceived));
   m_udp_sock->dataReceived.connect(
@@ -504,8 +510,21 @@ void Reflector::requestQsy(ReflectorClient *client, uint32_t tg)
     if (tg == 0) { return; }
   }
 
-  cout << client->callsign() << ": Requesting QSY from TG #"
-       << current_tg << " to TG #" << tg << endl;
+  std::string msg = client->callsign() + ": Requesting QSY from TG #" + std::to_string(current_tg) + " to TG #" + std::to_string(tg);
+  cout << msg << endl;
+
+#ifdef HAVE_MQTT
+  if(m_mqtt_handler) {
+    Json::Value client_data;
+    client_data["callsign"] = client->callsign();
+    client_data["event"] = "qsy";
+    client_data["tg"] = tg;
+    client_data["from_tg"] = current_tg;
+    client_data["message"] = msg;
+
+    m_mqtt_handler->publishSystemEvent("qsy", client_data);
+  }
+#endif
 
   broadcastMsg(MsgRequestQsy(tg),
       ReflectorClient::mkAndFilter(
@@ -699,9 +718,18 @@ bool Reflector::callsignOk(const std::string& callsign) const
   const std::regex accept_callsign_re(accept_cs_re_str);
   if (!std::regex_match(callsign, accept_callsign_re))
   {
-    std::cerr << "*** WARNING: The callsign '" << callsign
-              << "' is not accepted by configuration (ACCEPT_CALLSIGN)"
-              << std::endl;
+    std::string msg = "*** WARNING: The callsign '" + callsign + "' is not accepted by configuration (ACCEPT_CALLSIGN)";
+    std::cerr << msg << std::endl;
+#ifdef HAVE_MQTT
+    if(m_mqtt_handler) {
+      Json::Value client_data;
+      client_data["callsign"] = callsign;
+      client_data["event"] = "reject";
+      client_data["message"] = msg;
+
+      m_mqtt_handler->publishSystemEvent("callsigns", client_data);
+    }
+#endif
     return false;
   }
 
@@ -713,9 +741,19 @@ bool Reflector::callsignOk(const std::string& callsign) const
     const std::regex reject_callsign_re(reject_cs_re_str);
     if (std::regex_match(callsign, reject_callsign_re))
     {
-      std::cerr << "*** WARNING: The callsign '" << callsign
-                << "' has been rejected by configuration (REJECT_CALLSIGN)."
-                << std::endl;
+      std::string msg = "*** WARNING: The callsign '" + callsign + "' has been rejected by configuration (REJECT_CALLSIGN).";
+      std::cerr << msg << std::endl;
+
+#ifdef HAVE_MQTT
+      if(m_mqtt_handler) {
+        Json::Value client_data;
+        client_data["callsign"] = callsign;
+        client_data["event"] = "reject";
+        client_data["message"] = msg;
+
+        m_mqtt_handler->publishSystemEvent("callsigns", client_data);
+      }
+#endif
       return false;
     }
   }
@@ -802,12 +840,19 @@ Async::SslX509 Reflector::csrReceived(Async::SslCertSigningReq& req)
 
   if (!csr.isNull() && (req.publicKey() != csr.publicKey()))
   {
-    std::cerr << "*** WARNING: The received CSR with callsign '"
-              << callsign << "' has a different public key "
-                 "than the current CSR. That may be a sign of someone "
-                 "trying to hijack a callsign or the owner of the "
-                 "callsign has generated a new private/public key pair."
-              << std::endl;
+    std::string msg = "*** WARNING: The received CSR with callsign '" + callsign + 
+      "' has a different public key than the current CSR. That may be a sign of someone trying to hijack a callsign or the owner of the callsign has generated a new private/public key pair.";
+    std::cerr << msg << std::endl;
+#ifdef HAVE_MQTT
+    if(m_mqtt_handler) {
+      Json::Value client_data;
+      client_data["callsign"] = callsign;
+      client_data["event"] = "csr";
+      client_data["message"] = msg;
+
+      m_mqtt_handler->publishSystemEvent("warnings", client_data);
+    }
+#endif
     return nullptr;
   }
 
@@ -881,20 +926,29 @@ void Reflector::clientConnected(Async::FramedTcpConnection *con)
 {
   std::cout << con->remoteHost() << ":" << con->remotePort()
        << ": Client connected" << endl;
-  ReflectorClient *client = new ReflectorClient(this, con, m_cfg);
+  
+  ReflectorClient *client = new ReflectorClient(this, con, m_cfg
+#ifdef HAVE_MQTT
+  , m_mqtt_handler.get()
+#endif
+  );
+
   con->verifyPeer.connect(sigc::mem_fun(*this, &Reflector::onVerifyPeer));
   m_client_con_map[con] = client;
 
 #ifdef HAVE_MQTT
-  if (m_mqtt_handler && m_mqtt_handler->isConnected())
-  {
-      // Publish node connect event
-      Json::Value client_data;
-      client_data["host"] = con->remoteHost().toString();
-      client_data["port"] = con->remotePort();
-      
-      Json::FastWriter writer;
-      m_mqtt_handler->publishNodeEvent("connect", "", writer.write(client_data));
+  if(m_mqtt_handler) {
+
+    // Publish node connect event
+    Json::Value client_data;
+    client_data["host"] = con->remoteHost().toString();
+    client_data["port"] = con->remotePort();
+    client_data["event"] = "connect";
+
+    if(!client->callsign().empty())
+      client_data["callsign"] = client->callsign();
+
+    m_mqtt_handler->publishSystemEvent("connections", client_data);
   }
 #endif
 } /* Reflector::clientConnected */
@@ -931,22 +985,23 @@ void Reflector::clientDisconnected(Async::FramedTcpConnection *con,
   //Application::app().runTask([=]{ delete client; });
 
 #ifdef HAVE_MQTT
-  if (m_mqtt_handler && m_mqtt_handler->isConnected())
+  if (m_mqtt_handler)
   {
       // Publish node disconnect event
       Json::Value client_data;
       client_data["host"] = con->remoteHost().toString();
       client_data["port"] = con->remotePort();
       client_data["reason"] = TcpConnection::disconnectReasonStr(reason);
-      client_data["callsign"] = client->callsign();
+      client_data["event"] = "disconnect";
       
-      Json::FastWriter writer;
-      m_mqtt_handler->publishNodeEvent("disconnect", "", writer.write(client_data));
+      if(!client->callsign().empty())
+        client_data["callsign"] = client->callsign();
+      
+      m_mqtt_handler->publishSystemEvent("connections", client_data);
   }
 #endif
 
   delete client;
-
 } /* Reflector::clientDisconnected */
 
 
@@ -1361,15 +1416,29 @@ void Reflector::onTalkerUpdated(uint32_t tg, ReflectorClient* old_talker,
           ReflectorClient::mkOrFilter(
             ReflectorClient::TgFilter(tg),
             ReflectorClient::TgMonitorFilter(tg))));
+
     if (tg == tgForV1Clients())
     {
       broadcastMsg(MsgTalkerStopV1(old_talker->callsign()), v1_client_filter);
     }
+
     broadcastUdpMsg(MsgUdpFlushSamples(),
           ReflectorClient::mkAndFilter(
             ReflectorClient::TgFilter(tg),
             ReflectorClient::ExceptFilter(old_talker)));
+
+#ifdef HAVE_MQTT
+    if(m_mqtt_handler)
+    {
+      Json::Value client_data;
+      client_data["callsign"] = old_talker->callsign();
+      client_data["event"] = "stop";
+
+      m_mqtt_handler->publishSystemEvent("talker/" + std::to_string(tg), client_data);
+    }
+#endif
   }
+
   if (new_talker != 0)
   {
     cout << new_talker->callsign() << ": Talker start on TG #" << tg << endl;
@@ -1380,10 +1449,22 @@ void Reflector::onTalkerUpdated(uint32_t tg, ReflectorClient* old_talker,
           ReflectorClient::mkOrFilter(
             ReflectorClient::TgFilter(tg),
             ReflectorClient::TgMonitorFilter(tg))));
+
     if (tg == tgForV1Clients())
     {
       broadcastMsg(MsgTalkerStartV1(new_talker->callsign()), v1_client_filter);
     }
+
+#ifdef HAVE_MQTT
+    if(m_mqtt_handler)
+    {
+      Json::Value client_data;
+      client_data["callsign"] = new_talker->callsign();
+      client_data["event"] = "start";
+      
+      m_mqtt_handler->publishSystemEvent("talker/" + std::to_string(tg), client_data);
+    }
+#endif
   }
 } /* Reflector::onTalkerUpdated */
 
@@ -1424,11 +1505,6 @@ void Reflector::httpRequestReceived(Async::HttpServerConnection *con,
   res.setSendContent(req.method == "GET");
   res.setCode(200);
   con->write(res);
-
-#ifdef HAVE_MQTT
-  // Also publish status to MQTT
-  publishStatusToMqtt();
-#endif
 } /* Reflector::requestReceived */
 
 
@@ -1462,6 +1538,18 @@ void Reflector::onRequestAutoQsy(uint32_t from_tg)
       ReflectorClient::mkAndFilter(
         ge_v2_client_filter,
         ReflectorClient::TgFilter(from_tg)));
+
+#ifdef HAVE_MQTT
+  if(m_mqtt_handler) {
+    Json::Value client_data;
+    client_data["event"] = "auto_qsy_request";
+    client_data["tg"] = tg;
+    client_data["from_tg"] = from_tg;
+
+    m_mqtt_handler->publishSystemEvent("qsy", client_data);
+  }
+#endif
+
 } /* Reflector::onRequestAutoQsy */
 
 
@@ -2423,8 +2511,10 @@ void Reflector::handleMqttCommand(const std::string& command)
     
     if (!(ss >> cmd))
     {
-        response << "ERR:Invalid MQTT command '" << command << "'";
-        m_mqtt_handler->publishSystemEvent("command_reply", response.str());
+        Json::Value client_data;
+        client_data["command"] = command;
+        client_data["message"] = "ERR:Invalid MQTT command '" + command + "'";
+        m_mqtt_handler->publishCommandReply(client_data);
         return;
     }
     
@@ -2481,9 +2571,10 @@ void Reflector::handleMqttCommand(const std::string& command)
         unsigned blocktime;
         if (!(ss >> subcmd >> callsign >> blocktime))
         {
-            response << "ERR:Invalid NODE MQTT command '" << command << "'. "
-                     << "Usage: NODE BLOCK <callsign> <blocktime seconds>";
-            m_mqtt_handler->publishSystemEvent("command_reply", response.str());
+            Json::Value client_data;
+            client_data["command"] = command;
+            client_data["message"] = "ERR:Invalid NODE MQTT command '" + command + "'. " + "Usage: NODE BLOCK <callsign> <blocktime seconds>";
+            m_mqtt_handler->publishCommandReply(client_data);
             return;
         }
         std::transform(subcmd.begin(), subcmd.end(), subcmd.begin(), ::toupper);
@@ -2511,9 +2602,10 @@ void Reflector::handleMqttCommand(const std::string& command)
         std::string subcmd;
         if (!(ss >> subcmd))
         {
-            response << "ERR:Invalid CA MQTT command '" << command << "'. "
-                     << "Usage: CA PENDING|SIGN <callsign>|LS|RM <callsign>";
-            m_mqtt_handler->publishSystemEvent("command_reply", response.str());
+            Json::Value client_data;
+            client_data["command"] = command;
+            client_data["message"] = "ERR:Invalid CA MQTT command '" + command + "'. " + "Usage: CA PENDING|SIGN <callsign>|LS|RM <callsign>";
+            m_mqtt_handler->publishCommandReply(client_data);
             return;
         }
         std::transform(subcmd.begin(), subcmd.end(), subcmd.begin(), ::toupper);
@@ -2522,9 +2614,10 @@ void Reflector::handleMqttCommand(const std::string& command)
             std::string cn;
             if (!(ss >> cn))
             {
-                response << "ERR:Invalid CA SIGN MQTT command '" << command << "'. "
-                         << "Usage: CA SIGN <callsign>";
-                m_mqtt_handler->publishSystemEvent("command_reply", response.str());
+                Json::Value client_data;
+                client_data["command"] = command;
+                client_data["message"] = "ERR:Invalid CA SIGN MQTT command '" + command + "'. " + "Usage: CA SIGN <callsign>";
+                m_mqtt_handler->publishCommandReply(client_data);
                 return;
             }
             auto cert = signClientCsr(cn);
@@ -2542,9 +2635,10 @@ void Reflector::handleMqttCommand(const std::string& command)
             std::string cn;
             if (!(ss >> cn))
             {
-                response << "ERR:Invalid CA RM MQTT command '" << command << "'. "
-                         << "Usage: CA RM <callsign>";
-                m_mqtt_handler->publishSystemEvent("command_reply", response.str());
+                Json::Value client_data;
+                client_data["command"] = command;
+                client_data["message"] = "ERR:Invalid CA RM MQTT command '" + command + "'. " + "Usage: CA RM <callsign>";
+                m_mqtt_handler->publishCommandReply(client_data);
                 return;
             }
             if (removeClientCert(cn))
@@ -2622,7 +2716,7 @@ void Reflector::handleMqttCommand(const std::string& command)
                  << "  NODE BLOCK <callsign> <seconds> - Block a node\n"
                  << "  CA SIGN <callsign> - Sign a certificate\n"
                  << "  CA RM <callsign> - Remove a certificate\n"
-                 << "  STATUS - Publish current status to MQTT\n"
+                 << "  STATUS - Show current status\n"
                  << "  HELP - Show this help";
     }
     else
@@ -2631,18 +2725,17 @@ void Reflector::handleMqttCommand(const std::string& command)
                  << "'. Use HELP for available commands";
     }
 
-    m_mqtt_handler->publishSystemEvent("command_reply", response.str());
+    Json::Value client_data;
+    client_data["command"] = command;
+    client_data["message"] = response.str();
+
+    m_mqtt_handler->publishCommandReply(client_data);
 }
 
 void Reflector::publishStatusToMqtt()
 {
     if (m_mqtt_handler)
-    {
-        // Convert current status to JSON string
-        Json::FastWriter writer;
-        std::string status_json = writer.write(m_status);
-        m_mqtt_handler->publishStatus(status_json);
-    }
+        m_mqtt_handler->publishSystemEvent("status", m_status);
 }
 
 void Reflector::publishMqttHeartbeat()
@@ -2657,7 +2750,7 @@ void Reflector::publishMqttHeartbeat()
     return;
   }
 
-  if (!m_mqtt_handler->isConnected())
+  if (!m_mqtt_handler->isConnectedSafe())
   {
     std::cout << "MQTT not connected, attempting reconnect" << std::endl;
     for(int i = 0; i < 3; i++)
@@ -2668,7 +2761,7 @@ void Reflector::publishMqttHeartbeat()
         break;
       }
     }
-    if(!m_mqtt_handler->isConnected())
+    if(!m_mqtt_handler->isConnectedSafe())
     {
       std::cout << "MQTT reconnect failed, skipping heartbeat" << std::endl;
       return;

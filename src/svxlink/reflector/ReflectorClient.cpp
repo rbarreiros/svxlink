@@ -63,6 +63,9 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "ReflectorClient.h"
 #include "Reflector.h"
 #include "TGHandler.h"
+#ifdef HAVE_MQTT
+#include "MqttHandler.h"
+#endif
 
 
 /****************************************************************************
@@ -183,7 +186,11 @@ bool ReflectorClient::TgFilter::operator()(ReflectorClient* client) const
 
 
 ReflectorClient::ReflectorClient(Reflector *ref, Async::FramedTcpConnection *con,
-                                 Async::Config *cfg)
+                                 Async::Config *cfg
+#ifdef HAVE_MQTT
+                                 , MqttHandler* mqtt_handler
+#endif
+                                 )
   : m_con(con), m_con_state(STATE_EXPECT_PROTO_VER),
     m_disc_timer(10000, Timer::TYPE_ONESHOT, false),
     m_client_id(newClientId(this)), m_remote_udp_port(0), m_cfg(cfg),
@@ -195,6 +202,9 @@ ReflectorClient::ReflectorClient(Reflector *ref, Async::FramedTcpConnection *con
     m_udp_heartbeat_rx_cnt(UDP_HEARTBEAT_RX_CNT_RESET),
     m_reflector(ref), m_blocktime(0), m_remaining_blocktime(0),
     m_current_tg(0), m_udp_cipher_iv_cntr(0)
+#ifdef HAVE_MQTT
+    , m_mqtt_handler(mqtt_handler)
+#endif
 {
   m_con->setMaxRxFrameSize(ReflectorMsg::MAX_PREAUTH_FRAME_SIZE);
   m_con->setMaxTxFrameSize(ReflectorMsg::MAX_POSTAUTH_FRAME_SIZE);

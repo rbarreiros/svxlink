@@ -63,13 +63,14 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "ReflectorMsg.h"
 #include "ProtoVer.h"
 
-
 /****************************************************************************
  *
  * Forward declarations
  *
  ****************************************************************************/
-
+#ifdef HAVE_MQTT
+class MqttHandler;
+#endif
 
 
 /****************************************************************************
@@ -274,9 +275,14 @@ class ReflectorClient : public sigc::trackable
      * @param   ref The associated Reflector object
      * @param   con The associated FramedTcpConnection object
      * @param   cfg The associated configuration file object
+     * @param   mqtt_handler Pointer to the MQTT handler (optional, can be nullptr)
      */
     ReflectorClient(Reflector *ref, Async::FramedTcpConnection *con,
-                    Async::Config* cfg);
+                    Async::Config* cfg
+#ifdef HAVE_MQTT
+                    , MqttHandler* mqtt_handler = nullptr
+#endif
+                    );
 
     /**
      * @brief 	Destructor
@@ -552,6 +558,10 @@ class ReflectorClient : public sigc::trackable
     UdpCipher::IVCntr           m_udp_cipher_iv_cntr;
     Async::AtTimer              m_renew_cert_timer;
     Json::Value*                m_status                {nullptr};
+
+#ifdef HAVE_MQTT
+    MqttHandler* m_mqtt_handler;
+#endif
 
     static ClientId newClientId(ReflectorClient* client);
 

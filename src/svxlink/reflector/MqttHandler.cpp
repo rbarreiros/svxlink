@@ -113,7 +113,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 MqttHandler::MqttHandler(Reflector *reflector)
-    : m_reflector(reflector), m_initialized(false)
+    : m_reflector(reflector), m_initialized(false), m_connected_state(false)
 {
 }
 
@@ -179,121 +179,17 @@ bool MqttHandler::reconnect()
     return connect();
 }
 
-void MqttHandler::publishStatus(const std::string &status_json)
-{
-    if (!m_initialized)
-        return;
-
-    try
-    {
-        // Create message with timestamp
-        Json::Value message;
-        message["data"] = Json::Value(status_json);
-        message["timestamp"] = getCurrentTimestamp();
-        message["reflector_id"] = m_reflector_id; // I know we can get the reflector id in the path, but this helps others by just reading the json field
-
-        Json::FastWriter writer;
-        std::string payload = writer.write(message);
-
-        std::string topic = buildTopic("status");
-        mqtt::message_ptr pubmsg = mqtt::make_message(topic, payload);
-        pubmsg->set_qos(1);
-
-        m_client->publish(pubmsg);
-    }
-    catch (const mqtt::exception &exc)
-    {
-        std::cerr << "*** ERROR: MQTT status publish failed: " << exc.what() << std::endl;
-    }
-}
-
-void MqttHandler::publishNodeEvent(const std::string &event_type,
-                                   const std::string &callsign,
-                                   const std::string &event_data)
-{
-    if (!m_initialized)
-    {
-        std::cout << "MQTT not connected, skipping publishNodeEvent" << std::endl;
-        return;
-    }
-
-    try
-    {
-        Json::Value message;
-        Json::Value data;
-        data["callsign"] = callsign;
-
-        if (!event_data.empty())
-        {
-            // Try to parse event_data as JSON, otherwise use as string
-            Json::Reader reader;
-            Json::Value parsed_data;
-            if (reader.parse(event_data, parsed_data))
-                data["data"] = parsed_data;
-            else
-                data["data"] = event_data;
-        }
-
-        message["data"] = data;
-        message["timestamp"] = getCurrentTimestamp();
-
-        Json::FastWriter writer;
-        std::string payload = writer.write(message);
-
-        std::string topic = buildTopic("nodes/" + event_type);
-        mqtt::message_ptr pubmsg = mqtt::make_message(topic, payload);
-        pubmsg->set_qos(0); // Fire and forget for events
-
-        m_client->publish(pubmsg);
-    }
-    catch (const mqtt::exception &exc)
-    {
-        std::cerr << "*** ERROR: MQTT node event publish failed: " << exc.what() << std::endl;
-    }
-}
-
 void MqttHandler::publishSystemEvent(const std::string &event_type,
-                                     const std::string &event_data)
+                                     Json::Value& data)
 {
-    if (!m_initialized)
-    {
-        std::cout << "MQTT not connected, skipping publishSystemEvent" << std::endl;
-        return;
-    }
-
-    std::cout << "publishSystemEvent: " << event_type << " " << event_data << std::endl;
     try
     {
-        Json::Value message;
-        Json::Value data;
-        data["event_type"] = event_type;
         data["timestamp"] = getCurrentTimestamp();
 
-        if (!event_data.empty())
-        {
-            Json::Reader reader;
-            Json::Value parsed_data;
-            if (reader.parse(event_data, parsed_data))
-            {
-                data["data"] = parsed_data;
-            }
-            else
-            {
-                data["data"] = event_data;
-            }
-        }
-
-        message["data"] = data;
-        message["timestamp"] = getCurrentTimestamp();
-
         Json::FastWriter writer;
-        std::string payload = writer.write(message);
-
-        std::string topic = buildTopic("events/" + event_type);
-        mqtt::message_ptr pubmsg = mqtt::make_message(topic, payload);
-        pubmsg->set_qos(0);
-
-        m_client->publish(pubmsg);
+        std::string payload = writer.write(data);
+        
+        publishTopic(buildTopic("system/" + event_type), payload, 0);
     }
     catch (const mqtt::exception &exc)
     {
@@ -301,14 +197,24 @@ void MqttHandler::publishSystemEvent(const std::string &event_type,
     }
 }
 
+void MqttHandler::publishCommandReply(Json::Value& data)
+{
+    try
+    {
+        data["timestamp"] = getCurrentTimestamp();
+
+        Json::FastWriter writer;
+        std::string payload = writer.write(data);
+        publishTopic(buildTopic("commands/reply"), payload, 0);
+    }
+    catch (const mqtt::exception &exc)
+    {
+        std::cerr << "*** ERROR: MQTT command reply publish failed: " << exc.what() << std::endl;
+    }
+}
+
 void MqttHandler::publishHeartbeat(int uptime_seconds)
 {
-    if (!m_initialized)
-    {
-        std::cout << "MQTT not connected, skipping publishHeartbeat" << std::endl;
-        return;
-    }
-
     try
     {
         Json::Value heartbeat_payload;
@@ -321,9 +227,7 @@ void MqttHandler::publishHeartbeat(int uptime_seconds)
         Json::FastWriter writer;
         std::string heartbeat_message = writer.write(heartbeat_payload);
 
-        std::string topic = buildTopic("lwt");
-
-        m_client->publish(topic, heartbeat_message, 0, false);
+        publishTopic(buildTopic("lwt"), heartbeat_message, 0);
     }
     catch (const mqtt::exception &exc)
     {
@@ -334,6 +238,11 @@ void MqttHandler::publishHeartbeat(int uptime_seconds)
 bool MqttHandler::isConnected() const
 {
     return (m_initialized && m_client && m_client->is_connected());
+}
+
+bool MqttHandler::isConnectedSafe() const
+{
+    return m_connected_state.load();
 }
 
 
@@ -388,17 +297,21 @@ bool MqttHandler::isConnected() const
      }
  }
  
- void MqttHandler::connected(const std::string &cause)
+ void MqttHandler::connected(const std::string& cause)
  {
-     std::cout << "MQTT connected to broker: " << cause << std::endl;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    std::cout << "MQTT Connected: " << cause << std::endl;
+    m_connected_state.store(true);
+    m_initialized = true;
  }
 
- void MqttHandler::connection_lost(const std::string &cause)
+ void MqttHandler::connection_lost(const std::string& cause)
 {
-    m_initialized = false;
-    // Was just for debugging purposes, not needed anymore
-    // std::cerr << "*** WARNING: MQTT connection lost: " << cause << std::endl;
-    // std::cout << "Will attempt to reconnect automatically..." << std::endl;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    std::cout << "MQTT Connection lost: " << cause << std::endl;
+    m_connected_state.store(false);
 }
 
 void MqttHandler::delivery_complete(mqtt::delivery_token_ptr token)
@@ -478,6 +391,24 @@ void MqttHandler::subscribeToCommands()
     catch (const std::exception &exc)
     {
         std::cerr << "*** ERROR: General subscription error: " << exc.what() << std::endl;
+    }
+}
+
+void MqttHandler::publishTopic(const std::string& topic, const std::string& data, int qos)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    if (!m_initialized || !m_connected_state.load())
+        return;
+
+    try
+    {
+        mqtt::message_ptr pubmsg = mqtt::make_message(topic, data, qos, false);
+        m_client->publish(pubmsg);
+    }
+    catch (const mqtt::exception &exc)
+    {
+        std::cerr << "*** ERROR: MQTT publish failed: " << exc.what() << std::endl;
     }
 }
 

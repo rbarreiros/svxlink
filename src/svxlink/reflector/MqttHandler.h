@@ -35,6 +35,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 #include <string>
 #include <memory>
+#include <mutex>
+#include <atomic>
 #include <mqtt/async_client.h>
 
 /****************************************************************************
@@ -93,6 +95,43 @@ class Reflector;
 
 This is the MQTT handler class for the reflector. It handles all MQTT traffic and
 the dispatching of incoming messages to the correct Reflector object.
+
+
+Convetions:
+
+    - Reflector lwt lives in MQTT_PREFIX/reflector/lwt
+    
+    - Reflector each node events live in MQTT_PREFIX/reflector/nodes/<callsign>/
+      All current connected nodes are published in the MQTT_PREFIX/reflector/nodes/connected as a json array of callsigns
+
+    - Reflector system events live in MQTT_PREFIX/reflector/system/
+      .oO(I wonder, should we publish messages ? stdout/stderr ?)
+
+    - Reflector commands are subscribed to MQTT_PREFIX/reflector/commands
+        The commands can be sent in JSON or in plain text.
+        JSON are sent to MQTT_PREFIX/reflector/commands in the format:
+          {"command": "<full command text like PTY"} 
+          For example:
+          {"command": "CFG GLOBAL REJECT_CALLSIGN N0CALL"}
+
+          you can send help to get the list of commands
+          {"command": "HELP"}
+
+        TEXT are sent to MQTT_PREFIX/reflector/commands/command in the same format as PTY
+        
+          "HELP"
+          "CFG GLOBAL REJECT_CALLSIGN N0CALL"
+        
+    - Reflector answers to commands are sent to MQTT_PREFIX/reflector/commands/reply
+        The answer is sent in JSON format:
+          {"data": "<full reply text like PTY"} 
+          For example:
+          {"data": "OK:Status published to MQTT"}
+
+        If the command is not found, the answer is sent in JSON format:
+          {"date": "ERR:Unknown MQTT command 'none'. Use HELP for available commands"}
+
+
 */
 class MqttHandler : public mqtt::callback
 {
@@ -128,21 +167,6 @@ public:
      */
     bool reconnect();
 
-    /**
-     * @brief Publish status to the MQTT broker
-     * @param status_json Status JSON
-     */
-    void publishStatus(const std::string& status_json);
-
-    /**
-     * @brief Publish node event to the MQTT broker
-     * @param event_type Event type
-     * @param callsign Callsign
-     * @param event_data Event data
-     */
-    void publishNodeEvent(const std::string& event_type, 
-                         const std::string& callsign,
-                         const std::string& event_data);
 
     /**
      * @brief Publish system event to the MQTT broker
@@ -150,7 +174,14 @@ public:
      * @param event_data Event data
      */
     void publishSystemEvent(const std::string& event_type,
-                           const std::string& event_data);
+                           Json::Value& data);
+
+
+    /**
+     * @brief Publish command reply to the MQTT broker
+     * @param reply Reply
+     */
+    void publishCommandReply(Json::Value& data);
 
     /**
      * @brief Publish heartbeat to the MQTT broker
@@ -159,11 +190,18 @@ public:
     void publishHeartbeat(int uptime_seconds);
 
     /** 
-     * @brief Check if the MQTT client is connected
+     * @brief Check if the MQTT client is connected (thread-safe version)
+     * @return True if the MQTT client is connected, false otherwise
+     */
+    bool isConnectedSafe() const;
+
+    /** 
+     * @brief Check if the MQTT client is connected (DEPRECATED)
      * 
      * BEWARE!!!!!! This function is not thread safe and cannot be called
      * from within a callback!!!! IT WILL HANG!!!!
      * 
+     * @deprecated Use isConnectedSafe() instead for thread safety
      * @return True if the MQTT client is connected, false otherwise
      */
     bool isConnected() const;
@@ -215,6 +253,14 @@ private:
     void subscribeToCommands();
 
     /**
+     * @brief Publish a topic to the MQTT broker
+     * @param topic Topic
+     * @param data Data
+     */
+    void publishTopic(const std::string& topic, const std::string& data, int qos = 0);
+
+
+    /**
      * @brief Build a topic
      */
     std::string buildTopic(const std::string& topic_type) const;
@@ -259,6 +305,16 @@ private:
      * @brief Command callback
      */
     std::function<void(const std::string&)> m_command_callback;
+
+    /**
+     * @brief Thread safety mutex
+     */
+    mutable std::mutex m_mutex;
+
+    /**
+     * @brief Thread-safe connection state tracking
+     */
+    std::atomic<bool> m_connected_state;
 };
 
 #endif // MQTT_HANDLER_H 
