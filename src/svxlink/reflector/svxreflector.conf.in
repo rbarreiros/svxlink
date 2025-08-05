@@ -27,7 +27,7 @@ COMMAND_PTY=/dev/shm/reflector_ctrl
 CERT_CA_HOOK=@SVX_SHARE_INSTALL_DIR@/ca-hook.py
 
 # MQTT Configuration (optional)
-MQTT_ENABLED=false
+MQTT_ENABLED=0
 MQTT_BROKER_HOST=localhost
 MQTT_BROKER_PORT=1883
 MQTT_USERNAME=svxreflector
