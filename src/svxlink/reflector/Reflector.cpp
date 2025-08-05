@@ -232,7 +232,8 @@ Reflector::Reflector(void)
   : m_srv(0), m_udp_sock(0), m_tg_for_v1_clients(1), m_random_qsy_lo(0),
     m_random_qsy_hi(0), m_random_qsy_tg(0), m_http_server(0), m_cmd_pty(0),
     m_keys_dir("private/"), m_pending_csrs_dir("pending_csrs/"),
-    m_csrs_dir("csrs/"), m_certs_dir("certs/"), m_pki_dir("pki/")
+    m_csrs_dir("csrs/"), m_certs_dir("certs/"), m_pki_dir("pki/"),
+    m_state_cfg(0), m_state_file_path(SVX_LOCAL_STATE_DIR "/svxreflector.state")
 #ifdef HAVE_MQTT
     , m_mqtt_heartbeat_timer(MQTT_HEARTBEAT_INTERVAL, Async::Timer::TYPE_PERIODIC), m_start_time(time(NULL))
 #endif
@@ -281,6 +282,8 @@ Reflector::~Reflector(void)
   m_srv = 0;
   delete m_cmd_pty;
   m_cmd_pty = 0;
+  delete m_state_cfg;
+  m_state_cfg = 0;
   m_client_con_map.clear();
   ReflectorClient::cleanup();
   delete TGHandler::instance();
@@ -314,7 +317,7 @@ bool Reflector::initialize(Async::Config &cfg)
   // bear in mind that if the server certificate changes, so does our id
   if (!initMqtt())
   {
-    std::cerr << "*** WARNING: MQTT initialization failed, continuing without MQTT support" << std::endl;
+    std::cerr << "*** WARNING: MQTT initialization failed." << std::endl;
   }
 #endif
 
@@ -392,6 +395,12 @@ bool Reflector::initialize(Async::Config &cfg)
   m_cfg->getValue("GLOBAL", "ACCEPT_CERT_EMAIL", m_accept_cert_email);
 
   m_cfg->valueUpdated.connect(sigc::mem_fun(*this, &Reflector::cfgUpdated));
+
+  // Load state file if it exists
+  if (!loadStateFile())
+  {
+    std::cout << "*** INFO: No state file found or failed to load, using original configuration only" << std::endl;
+  }
 
   return true;
 } /* Reflector::initialize */
@@ -1637,10 +1646,38 @@ void Reflector::ctrlPtyDataReceived(const void *buf, size_t count)
       goto write_status;
     }
   }
+  else if (cmd == "CFG_SAVE")
+  {
+    if (saveStateFile())
+    {
+      std::cout << "Configuration state saved successfully" << std::endl;
+    }
+    else
+    {
+      errss << "Failed to save configuration state";
+      goto write_status;
+    }
+  }
+  else if (cmd == "CFG_DISCARD")
+  {
+    if (discardStateFile())
+    {
+      std::cout << "Configuration state discarded successfully" << std::endl;
+    }
+    else
+    {
+      errss << "Failed to discard configuration state";
+      goto write_status;
+    }
+  }
+  else if (cmd == "CFG_SHOW")
+  {
+    showConfigDiff();
+  }
   else
   {
     errss << "Unknown PTY command '" << cmdline
-          << "'. Valid commands are: CFG";
+          << "'. Valid commands are: CFG, CFG_SAVE, CFG_DISCARD, CFG_SHOW, NODE, CA";
   }
 
   write_status:
@@ -2377,6 +2414,8 @@ bool Reflector::initMqtt()
 
 void Reflector::handleMqttCommand(const std::string& command)
 {
+    std::cout << "handleMqttCommand: " << command << std::endl;
+
     // Parse and execute command (similar to PTY command handling)
     std::istringstream ss(command);
     std::ostringstream response;
@@ -2385,7 +2424,7 @@ void Reflector::handleMqttCommand(const std::string& command)
     if (!(ss >> cmd))
     {
         response << "ERR:Invalid MQTT command '" << command << "'";
-        sendMqttReply(response.str());
+        m_mqtt_handler->publishSystemEvent("command_reply", response.str());
         return;
     }
     
@@ -2395,8 +2434,17 @@ void Reflector::handleMqttCommand(const std::string& command)
     {
         std::string section, tag, value;
         ss >> section >> tag >> value;
+
+        if(!section.empty())
+            // Sections are all uppercase, 
+            std::transform(section.begin(), section.end(), section.begin(), ::toupper);
+
         if (!value.empty())
         {
+            // Tags are all uppercase, except when section is PASSWORDS! Passwords section is case sensitive!
+            if (section != "PASSWORDS")
+                std::transform(tag.begin(), tag.end(), tag.begin(), ::toupper);
+
             m_cfg->setValue(section, tag, value);
             response << "OK:Configuration updated " << section << "/" << tag << "=\"" << value << "\"";
         }
@@ -2435,7 +2483,7 @@ void Reflector::handleMqttCommand(const std::string& command)
         {
             response << "ERR:Invalid NODE MQTT command '" << command << "'. "
                      << "Usage: NODE BLOCK <callsign> <blocktime seconds>";
-            sendMqttReply(response.str());
+            m_mqtt_handler->publishSystemEvent("command_reply", response.str());
             return;
         }
         std::transform(subcmd.begin(), subcmd.end(), subcmd.begin(), ::toupper);
@@ -2465,7 +2513,7 @@ void Reflector::handleMqttCommand(const std::string& command)
         {
             response << "ERR:Invalid CA MQTT command '" << command << "'. "
                      << "Usage: CA PENDING|SIGN <callsign>|LS|RM <callsign>";
-            sendMqttReply(response.str());
+            m_mqtt_handler->publishSystemEvent("command_reply", response.str());
             return;
         }
         std::transform(subcmd.begin(), subcmd.end(), subcmd.begin(), ::toupper);
@@ -2476,7 +2524,7 @@ void Reflector::handleMqttCommand(const std::string& command)
             {
                 response << "ERR:Invalid CA SIGN MQTT command '" << command << "'. "
                          << "Usage: CA SIGN <callsign>";
-                sendMqttReply(response.str());
+                m_mqtt_handler->publishSystemEvent("command_reply", response.str());
                 return;
             }
             auto cert = signClientCsr(cn);
@@ -2496,7 +2544,7 @@ void Reflector::handleMqttCommand(const std::string& command)
             {
                 response << "ERR:Invalid CA RM MQTT command '" << command << "'. "
                          << "Usage: CA RM <callsign>";
-                sendMqttReply(response.str());
+                m_mqtt_handler->publishSystemEvent("command_reply", response.str());
                 return;
             }
             if (removeClientCert(cn))
@@ -2522,6 +2570,42 @@ void Reflector::handleMqttCommand(const std::string& command)
                      << "Usage: CA PENDING|SIGN <callsign>|LS|RM <callsign>";
         }
     }
+    else if (cmd == "CFG_SAVE")
+    {
+        if (saveStateFile())
+        {
+            response << "OK:Configuration state saved successfully";
+        }
+        else
+        {
+            response << "ERR:Failed to save configuration state";
+        }
+    }
+    else if (cmd == "CFG_DISCARD")
+    {
+        if (discardStateFile())
+        {
+            response << "OK:Configuration state discarded successfully";
+        }
+        else
+        {
+            response << "ERR:Failed to discard configuration state";
+        }
+    }
+    else if (cmd == "CFG_SHOW")
+    {
+        response << "OK:Current configuration state:";
+        auto sections = m_cfg->listSections();
+        for (const auto& section : sections)
+        {
+            auto tags = m_cfg->listSection(section);
+            for (const auto& tag : tags)
+            {
+                std::string value = m_cfg->getValue(section, tag);
+                response << "\n  " << section << "/" << tag << "=\"" << value << "\"";
+            }
+        }
+    }
     else if (cmd == "STATUS")
     {
         publishStatusToMqtt();
@@ -2529,8 +2613,12 @@ void Reflector::handleMqttCommand(const std::string& command)
     }
     else if (cmd == "HELP")
     {
+      std::cout << " Sending help" << std::endl;
         response << "OK:Available MQTT commands:\n"
                  << "  CFG [<section>] [<tag>] [<value>] - Configuration management\n"
+                 << "  CFG_SAVE - Save current configuration state\n"
+                 << "  CFG_DISCARD - Discard configuration state\n"
+                 << "  CFG_SHOW - Show current configuration state\n"
                  << "  NODE BLOCK <callsign> <seconds> - Block a node\n"
                  << "  CA SIGN <callsign> - Sign a certificate\n"
                  << "  CA RM <callsign> - Remove a certificate\n"
@@ -2543,12 +2631,12 @@ void Reflector::handleMqttCommand(const std::string& command)
                  << "'. Use HELP for available commands";
     }
 
-    sendMqttReply(response.str());
+    m_mqtt_handler->publishSystemEvent("command_reply", response.str());
 }
 
 void Reflector::publishStatusToMqtt()
 {
-    if (m_mqtt_handler && m_mqtt_handler->isConnected())
+    if (m_mqtt_handler)
     {
         // Convert current status to JSON string
         Json::FastWriter writer;
@@ -2557,21 +2645,40 @@ void Reflector::publishStatusToMqtt()
     }
 }
 
-void Reflector::sendMqttReply(const std::string& reply)
-{
-    if (m_mqtt_handler && m_mqtt_handler->isConnected())
-    {
-        // Publish reply
-        m_mqtt_handler->publishSystemEvent("command_reply", reply);
-    }
-}
-
 void Reflector::publishMqttHeartbeat()
 {
+  // We need to check if the client is connected, if not, we need to 
+  // reconnect, we try 3 times every heartbeat interval.
+
+  if(m_mqtt_handler == nullptr)
+  {
+    std::cout << "MQTT handler not initialized, probably an error occurred that could be fixed by now. Lets try again" << std::endl;
+    initMqtt();
+    return;
+  }
+
+  if (!m_mqtt_handler->isConnected())
+  {
+    std::cout << "MQTT not connected, attempting reconnect" << std::endl;
+    for(int i = 0; i < 3; i++)
+    {
+      if(m_mqtt_handler->reconnect())
+      {
+        std::cout << "MQTT reconnect successful" << std::endl;
+        break;
+      }
+    }
+    if(!m_mqtt_handler->isConnected())
+    {
+      std::cout << "MQTT reconnect failed, skipping heartbeat" << std::endl;
+      return;
+    }
+  }
+
     // Log timestamp to debug heartbeat frequency
     time_t now = time(NULL);
     
-    if (m_mqtt_handler && m_mqtt_handler->isConnected()) {
+    if (m_mqtt_handler) {
         int uptime = static_cast<int>(now - m_start_time);
         m_mqtt_handler->publishHeartbeat(uptime);
     }
@@ -2639,6 +2746,155 @@ std::string Reflector::generateMqttClientId() const
 }
 
 #endif
+
+/****************************************************************************
+ *
+ * Configuration state file management
+ *
+ ****************************************************************************/
+
+bool Reflector::loadStateFile(void)
+{
+  // Check if state file exists
+  if (access(m_state_file_path.c_str(), F_OK) != 0)
+  {
+    return false; // No state file exists, which is OK
+  }
+
+  // Create state config object
+  m_state_cfg = new Async::Config();
+  
+  // Try to load the state file
+  if (!m_state_cfg->open(m_state_file_path))
+  {
+    std::cerr << "*** WARNING: Failed to load state file '" << m_state_file_path 
+              << "', using original configuration only" << std::endl;
+    delete m_state_cfg;
+    m_state_cfg = 0;
+    return false;
+  }
+
+  std::cout << "Loading configuration state from '" << m_state_file_path << "'" << std::endl;
+
+  // Apply state file values over original config
+  // Iterate through all sections in state config
+  auto sections = m_state_cfg->listSections();
+  for (const auto& section : sections)
+  {
+    auto tags = m_state_cfg->listSection(section);
+    for (const auto& tag : tags)
+    {
+      std::string value;
+      if (m_state_cfg->getValue(section, tag, value))
+      {
+        // Apply the value to main config (this will trigger validation)
+        m_cfg->setValue(section, tag, value);
+        std::cout << "Applied state: " << section << "/" << tag << "=\"" << value << "\"" << std::endl;
+      }
+    }
+  }
+
+  return true;
+} /* Reflector::loadStateFile */
+
+
+bool Reflector::saveStateFile(void)
+{
+  // Check if we can write to the state file directory
+  std::string state_dir = m_state_file_path.substr(0, m_state_file_path.find_last_of('/'));
+  if (access(state_dir.c_str(), W_OK) != 0)
+  {
+    std::cerr << "*** ERROR: Cannot write to state file directory '" << state_dir << "'" << std::endl;
+    return false;
+  }
+
+  // Create a new config object to hold the complete current state
+  Async::Config state_config;
+  
+  // Copy all current values from main config to state config
+  auto sections = m_cfg->listSections();
+  for (const auto& section : sections)
+  {
+    auto tags = m_cfg->listSection(section);
+    for (const auto& tag : tags)
+    {
+      std::string value = m_cfg->getValue(section, tag);
+      state_config.setValue(section, tag, value);
+    }
+  }
+
+  // Write state config to file
+  // Note: Async::Config doesn't have a write method, so we'll implement a simple one
+  FILE* file = fopen(m_state_file_path.c_str(), "w");
+  if (file == nullptr)
+  {
+    std::cerr << "*** ERROR: Cannot open state file '" << m_state_file_path 
+              << "' for writing" << std::endl;
+    return false;
+  }
+
+  // Write all sections and values
+  for (const auto& section : sections)
+  {
+    fprintf(file, "[%s]\n", section.c_str());
+    auto tags = m_cfg->listSection(section);
+    for (const auto& tag : tags)
+    {
+      std::string value = m_cfg->getValue(section, tag);
+      fprintf(file, "%s=%s\n", tag.c_str(), value.c_str());
+    }
+    fprintf(file, "\n");
+  }
+
+  fclose(file);
+  
+  std::cout << "Configuration state saved to '" << m_state_file_path << "'" << std::endl;
+  return true;
+} /* Reflector::saveStateFile */
+
+
+bool Reflector::discardStateFile(void)
+{
+  // Delete the state file if it exists
+  if (access(m_state_file_path.c_str(), F_OK) == 0)
+  {
+    if (unlink(m_state_file_path.c_str()) == 0)
+    {
+      std::cout << "State file '" << m_state_file_path << "' deleted" << std::endl;
+    }
+    else
+    {
+      std::cerr << "*** ERROR: Failed to delete state file '" << m_state_file_path << "'" << std::endl;
+      return false;
+    }
+  }
+
+  // the state file was deleted, all configuration in memory will be lost if
+  // it's not saved. We'll keep them as they are just in case the user whishes
+  // to store them later on.
+
+  return true;
+} /* Reflector::discardStateFile */
+
+
+void Reflector::showConfigDiff(void)
+{
+  // This is a placeholder implementation
+  // In a real implementation, you would compare current config with original
+  std::cout << "Current configuration state:" << std::endl;
+  
+  auto sections = m_cfg->listSections();
+  for (const auto& section : sections)
+  {
+    auto tags = m_cfg->listSection(section);
+    for (const auto& tag : tags)
+    {
+      std::string value = m_cfg->getValue(section, tag);
+      std::cout << "  " << section << "/" << tag << "=\"" << value << "\"" << std::endl;
+    }
+  }
+} /* Reflector::showConfigDiff */
+
 
 /*
  * This file has not been truncated

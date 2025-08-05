@@ -67,7 +67,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #ifdef HAVE_MQTT
 #include "MqttHandler.h"
 
-#define MQTT_HEARTBEAT_INTERVAL 300000U
+// 1 minute
+#define MQTT_HEARTBEAT_INTERVAL 60000U
 #endif
 
 
@@ -263,6 +264,11 @@ class Reflector : public sigc::trackable
     std::string                 m_accept_cert_email;
     Json::Value                 m_status;
 
+    // Configuration state file management
+    Async::Config*              m_state_cfg;
+    std::string                 m_state_file_path;
+    std::string                 m_original_config_file;
+
 #ifdef HAVE_MQTT
     // MQTT handler class
     std::unique_ptr<MqttHandler> m_mqtt_handler;
@@ -284,7 +290,6 @@ class Reflector : public sigc::trackable
     bool initMqtt();
     void handleMqttCommand(const std::string& command);
     void publishStatusToMqtt();
-    void sendMqttReply(const std::string& reply);
     void publishMqttHeartbeat();
     std::string generateMqttClientId() const;
 #endif
@@ -320,6 +325,12 @@ class Reflector : public sigc::trackable
                    const std::string& defdir, std::string& defpath);
     bool removeClientCert(const std::string& cn);
     void runCAHook(const Async::Exec::Environment& env);
+
+    // Configuration state file management
+    bool loadStateFile(void);
+    bool saveStateFile(void);
+    bool discardStateFile(void);
+    void showConfigDiff(void);
 
 };  /* class Reflector */
 
