@@ -260,13 +260,6 @@ Reflector::Reflector(void)
                     << std::endl;
         }
       });
-#ifdef HAVE_MQTT
-  m_mqtt_heartbeat_timer.expired.connect(
-      [&](Async::Timer*)
-      {
-        publishMqttHeartbeat();
-      });
-#endif
   
   m_status["nodes"] = Json::Value(Json::objectValue);
 } /* Reflector::Reflector */
@@ -318,6 +311,18 @@ bool Reflector::initialize(Async::Config &cfg)
   if (!initMqtt())
   {
     std::cerr << "*** WARNING: MQTT initialization failed." << std::endl;
+  }
+
+  if(m_mqtt_enabled)
+  {
+    // If MQTT is enabled, start the heartbeat timer which
+    // will check if the MQTT connection is still alive
+    // and reconnect if needed
+    m_mqtt_heartbeat_timer.expired.connect(
+      [&](Async::Timer*)
+      {
+        publishMqttHeartbeat();
+      });
   }
 #endif
 
