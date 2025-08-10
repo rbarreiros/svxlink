@@ -257,6 +257,11 @@ class Reflector : public sigc::trackable
     std::string                 m_accept_cert_email;
     Json::Value                 m_status;
 
+    // Configuration state file management
+    Async::Config*              m_state_cfg;
+    std::string                 m_state_file_path;
+    std::string                 m_original_config_file;
+    
     Reflector(const Reflector&);
     Reflector& operator=(const Reflector&);
     void clientConnected(Async::FramedTcpConnection *con);
@@ -288,6 +293,12 @@ class Reflector : public sigc::trackable
                    const std::string& defdir, std::string& defpath);
     bool removeClientCert(const std::string& cn);
     void runCAHook(const Async::Exec::Environment& env);
+
+    // Configuration state file management
+    bool loadStateFile(void);
+    bool saveStateFile(void);
+    bool discardStateFile(void);
+    void showConfig(void);
 
 };  /* class Reflector */
 

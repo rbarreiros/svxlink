@@ -230,7 +230,8 @@ Reflector::Reflector(void)
   : m_srv(0), m_udp_sock(0), m_tg_for_v1_clients(1), m_random_qsy_lo(0),
     m_random_qsy_hi(0), m_random_qsy_tg(0), m_http_server(0), m_cmd_pty(0),
     m_keys_dir("private/"), m_pending_csrs_dir("pending_csrs/"),
-    m_csrs_dir("csrs/"), m_certs_dir("certs/"), m_pki_dir("pki/")
+    m_csrs_dir("csrs/"), m_certs_dir("certs/"), m_pki_dir("pki/"),
+    m_state_cfg(0), m_state_file_path(SVX_LOCAL_STATE_DIR "/svxreflector.state")
 {
   TGHandler::instance()->talkerUpdated.connect(
       mem_fun(*this, &Reflector::onTalkerUpdated));
@@ -370,6 +371,13 @@ bool Reflector::initialize(Async::Config &cfg)
 
   m_cfg->valueUpdated.connect(sigc::mem_fun(*this, &Reflector::cfgUpdated));
 
+  // Load state file if it exists
+  if (!loadStateFile())
+  {
+    std::cout << "*** INFO: No state file found or failed to load, "
+              << "using original configuration only" << std::endl;
+  }
+  
   return true;
 } /* Reflector::initialize */
 
@@ -1579,6 +1587,36 @@ void Reflector::ctrlPtyDataReceived(const void *buf, size_t count)
       goto write_status;
     }
   }
+  else if (cmd == "CFG_SAVE")
+  {
+    if (saveStateFile())
+    {
+      std::cout << "Configuration state saved successfully" 
+                << std::endl;
+    }
+    else
+    {
+      errss << "Failed to save configuration state";
+      goto write_status;
+    }
+  }
+  else if (cmd == "CFG_DISCARD")
+  {
+    if (discardStateFile())
+    {
+      std::cout << "Configuration state discarded successfully" 
+                << std::endl;
+    }
+    else
+    {
+      errss << "Failed to discard configuration state";
+      goto write_status;
+    }
+  }
+  else if (cmd == "CFG_SHOW")
+  {
+    showConfig();
+  }
   else
   {
     errss << "Unknown PTY command '" << cmdline
@@ -2257,7 +2295,160 @@ void Reflector::runCAHook(const Async::Exec::Environment& env)
   }
 } /* Reflector::runCAHook */
 
+/****************************************************************************
+ *
+ * Configuration state file management
+ *
+ ****************************************************************************/
 
+ bool Reflector::loadStateFile(void)
+ {
+   // Check if state file exists
+   if (access(m_state_file_path.c_str(), F_OK) != 0)
+   {
+     return false; // No state file exists, which is OK
+   }
+ 
+   // Create state config object
+   m_state_cfg = new Async::Config();
+   
+   // Try to load the state file
+   if (!m_state_cfg->open(m_state_file_path))
+   {
+     std::cerr << "*** WARNING: Failed to load state file '" << m_state_file_path 
+               << "', using original configuration only" << std::endl;
+     delete m_state_cfg;
+     m_state_cfg = 0;
+     return false;
+   }
+ 
+   std::cout << "Loading configuration state from '" << m_state_file_path << "'" << std::endl;
+ 
+   // Apply state file values over original config
+   // Iterate through all sections in state config
+   auto sections = m_state_cfg->listSections();
+   for (const auto& section : sections)
+   {
+     auto tags = m_state_cfg->listSection(section);
+     for (const auto& tag : tags)
+     {
+       std::string value;
+       if (m_state_cfg->getValue(section, tag, value))
+       {
+         // Apply the value to main config (this will trigger validation)
+         m_cfg->setValue(section, tag, value);
+         std::cout << "Applied state: " << section << "/" << tag << "=\"" << value << "\"" << std::endl;
+       }
+     }
+   }
+ 
+   return true;
+ } /* Reflector::loadStateFile */
+ 
+ 
+ bool Reflector::saveStateFile(void)
+ {
+   // Check if we can write to the state file directory
+   std::string state_dir = 
+    m_state_file_path.substr(0, m_state_file_path.find_last_of('/'));
+   
+   if (access(state_dir.c_str(), W_OK) != 0)
+   {
+     std::cerr << "*** ERROR: Cannot write to state file directory '" 
+               << state_dir << "'" << std::endl;
+     return false;
+   }
+ 
+   // Create a new config object to hold the complete current state
+   Async::Config state_config;
+   
+   // Copy all current values from main config to state config
+   auto sections = m_cfg->listSections();
+   for (const auto& section : sections)
+   {
+     auto tags = m_cfg->listSection(section);
+     for (const auto& tag : tags)
+     {
+       std::string value = m_cfg->getValue(section, tag);
+       state_config.setValue(section, tag, value);
+     }
+   }
+ 
+   // Write state config to file
+   // Note: Async::Config doesn't have a write method, 
+   // so we'll implement a simple one
+   FILE* file = fopen(m_state_file_path.c_str(), "w");
+   if (file == nullptr)
+   {
+     std::cerr << "*** ERROR: Cannot open state file '" 
+               << m_state_file_path 
+               << "' for writing" << std::endl;
+     return false;
+   }
+ 
+   // Write all sections and values
+   for (const auto& section : sections)
+   {
+     fprintf(file, "[%s]\n", section.c_str());
+     auto tags = m_cfg->listSection(section);
+     for (const auto& tag : tags)
+     {
+       std::string value = m_cfg->getValue(section, tag);
+       fprintf(file, "%s=%s\n", tag.c_str(), value.c_str());
+     }
+     fprintf(file, "\n");
+   }
+ 
+   fclose(file);
+   
+   std::cout << "Configuration state saved to '" 
+             << m_state_file_path << "'" << std::endl;
+   return true;
+ } /* Reflector::saveStateFile */
+ 
+ 
+ bool Reflector::discardStateFile(void)
+ {
+   // Delete the state file if it exists
+   if (access(m_state_file_path.c_str(), F_OK) == 0)
+   {
+     if (unlink(m_state_file_path.c_str()) == 0)
+     {
+       std::cout << "State file '" << m_state_file_path 
+                 << "' deleted" << std::endl;
+     }
+     else
+     {
+       std::cerr << "*** ERROR: Failed to delete state file '" 
+                 << m_state_file_path << "'" << std::endl;
+       return false;
+     }
+   }
+ 
+   // the state file was deleted, all configuration in memory will be lost if
+   // it's not saved. We'll keep them as they are just in case the user whishes
+   // to store them later on.
+ 
+   return true;
+ } /* Reflector::discardStateFile */
+ 
+ 
+ void Reflector::showConfig(void)
+ {
+   std::cout << "Current configuration state:" << std::endl;
+   
+   auto sections = m_cfg->listSections();
+   for (const auto& section : sections)
+   {
+     auto tags = m_cfg->listSection(section);
+     for (const auto& tag : tags)
+     {
+       std::string value = m_cfg->getValue(section, tag);
+       std::cout << "  " << section << "/" << tag << "=\"" << value << "\"" << std::endl;
+     }
+   }
+ } /* Reflector::showConfig */
+ 
 /*
  * This file has not been truncated
  */
