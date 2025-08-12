@@ -64,6 +64,13 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "ProtoVer.h"
 #include "ReflectorClient.h"
 
+#ifdef HAVE_MQTT
+#include "MqttHandler.h"
+
+// 1 minute
+#define MQTT_HEARTBEAT_INTERVAL 60000U
+#endif
+
 
 /****************************************************************************
  *
@@ -213,6 +220,10 @@ class Reflector : public sigc::trackable
 
     Json::Value& clientStatus(const std::string& callsign);
 
+#ifdef HAVE_MQTT
+    void updateConnectedNodes();
+#endif
+
   protected:
 
   private:
@@ -257,6 +268,41 @@ class Reflector : public sigc::trackable
     std::string                 m_accept_cert_email;
     Json::Value                 m_status;
 
+    // Configuration state file management
+    Async::Config*              m_state_cfg;
+    std::string                 m_state_file_path;
+    std::string                 m_original_config_file;
+
+#ifdef HAVE_MQTT
+    // MQTT handler class
+    std::unique_ptr<MqttHandler> m_mqtt_handler;
+
+    // MQTT configuration
+    bool m_mqtt_enabled;
+    
+    // MQTT heartbeat timer LWP 
+    Async::Timer m_mqtt_heartbeat_timer;
+    time_t m_start_time;
+
+    std::string m_mqtt_broker_host;
+    int m_mqtt_broker_port;
+    std::string m_mqtt_username;
+    std::string m_mqtt_password;
+    std::string m_mqtt_topic_prefix;
+    bool m_mqtt_ssl_enabled;
+    std::string m_mqtt_ca_cert_file;
+    std::string m_mqtt_client_cert_file;
+    std::string m_mqtt_client_key_file;
+    bool m_mqtt_ssl_verify_hostname;
+    
+    // MQTT methods
+    bool initMqtt();
+    void handleMqttCommand(const std::string& command);
+    void publishStatusToMqtt();
+    void publishMqttHeartbeat();
+    std::string generateMqttClientId() const;
+#endif
+
     Reflector(const Reflector&);
     Reflector& operator=(const Reflector&);
     void clientConnected(Async::FramedTcpConnection *con);
@@ -288,6 +334,26 @@ class Reflector : public sigc::trackable
                    const std::string& defdir, std::string& defpath);
     bool removeClientCert(const std::string& cn);
     void runCAHook(const Async::Exec::Environment& env);
+
+    // Configuration state file management
+    bool loadStateFile(void);
+    bool saveStateFile(void);
+    bool discardStateFile(void);
+    void showConfigDiff(void);
+
+    // Command handling methods (shared between PTY and MQTT)
+    enum class CommandResult { SUCCESS, ERROR };
+    struct CommandResponse {
+      CommandResult result;
+      std::string message;
+    };
+    
+    CommandResponse handleCfgCommand(std::istringstream& ss);
+    CommandResponse handleNodeCommand(std::istringstream& ss);
+    CommandResponse handleCaCommand(std::istringstream& ss);
+    CommandResponse handleCfgSaveCommand();
+    CommandResponse handleCfgDiscardCommand();
+    CommandResponse handleCfgShowCommand();
 
 };  /* class Reflector */
 

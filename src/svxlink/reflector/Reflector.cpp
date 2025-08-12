@@ -36,6 +36,9 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <fstream>
 #include <iterator>
 #include <regex>
+#include <functional>
+#include <cstring>
+#include <iomanip>
 
 
 /****************************************************************************
@@ -230,7 +233,11 @@ Reflector::Reflector(void)
   : m_srv(0), m_udp_sock(0), m_tg_for_v1_clients(1), m_random_qsy_lo(0),
     m_random_qsy_hi(0), m_random_qsy_tg(0), m_http_server(0), m_cmd_pty(0),
     m_keys_dir("private/"), m_pending_csrs_dir("pending_csrs/"),
-    m_csrs_dir("csrs/"), m_certs_dir("certs/"), m_pki_dir("pki/")
+    m_csrs_dir("csrs/"), m_certs_dir("certs/"), m_pki_dir("pki/"),
+    m_state_cfg(0), m_state_file_path(SVX_LOCAL_STATE_DIR "/svxreflector.state")
+#ifdef HAVE_MQTT
+    , m_mqtt_heartbeat_timer(MQTT_HEARTBEAT_INTERVAL, Async::Timer::TYPE_PERIODIC), m_start_time(time(NULL))
+#endif
 {
   TGHandler::instance()->talkerUpdated.connect(
       mem_fun(*this, &Reflector::onTalkerUpdated));
@@ -254,6 +261,7 @@ Reflector::Reflector(void)
                     << std::endl;
         }
       });
+  
   m_status["nodes"] = Json::Value(Json::objectValue);
 } /* Reflector::Reflector */
 
@@ -268,6 +276,8 @@ Reflector::~Reflector(void)
   m_srv = 0;
   delete m_cmd_pty;
   m_cmd_pty = 0;
+  delete m_state_cfg;
+  m_state_cfg = 0;
   m_client_con_map.clear();
   ReflectorClient::cleanup();
   delete TGHandler::instance();
@@ -295,10 +305,31 @@ bool Reflector::initialize(Async::Config &cfg)
 
   m_srv->setSslContext(m_ssl_ctx);
 
+#ifdef HAVE_MQTT
+  // Initialize MQTT after certificates are loaded/created
+  // because we use the server certificate to generate our mqtt client ID
+  // bear in mind that if the server certificate changes, so does our id
+  if (!initMqtt())
+  {
+    std::cerr << "*** WARNING: MQTT initialization failed." << std::endl;
+  }
+
+  // Only start the heartbeat timer if MQTT is enabled
+  // since the heartbear also checks if the connection is alive
+  if(m_mqtt_enabled) {
+    m_mqtt_heartbeat_timer.expired.connect(
+      [&](Async::Timer*)
+      {
+        publishMqttHeartbeat();
+      });
+  }
+#endif
+
   uint16_t udp_listen_port = 5300;
   cfg.getValue("GLOBAL", "LISTEN_PORT", udp_listen_port);
   m_udp_sock = new Async::EncryptedUdpSocket(udp_listen_port);
   const char* err = "unknown reason";
+
   if ((err="bad allocation",          (m_udp_sock == 0)) ||
       (err="initialization failure",  !m_udp_sock->initOk()) ||
       (err="unsupported cipher",      !m_udp_sock->setCipher(UdpCipher::NAME)))
@@ -307,8 +338,10 @@ bool Reflector::initialize(Async::Config &cfg)
               << err << std::endl;
     return false;
   }
+
   m_udp_sock->setCipherAADLength(UdpCipher::AADLEN);
   m_udp_sock->setTagLength(UdpCipher::TAGLEN);
+  
   m_udp_sock->cipherDataReceived.connect(
       mem_fun(*this, &Reflector::udpCipherDataReceived));
   m_udp_sock->dataReceived.connect(
@@ -369,6 +402,12 @@ bool Reflector::initialize(Async::Config &cfg)
   m_cfg->getValue("GLOBAL", "ACCEPT_CERT_EMAIL", m_accept_cert_email);
 
   m_cfg->valueUpdated.connect(sigc::mem_fun(*this, &Reflector::cfgUpdated));
+
+  // Load state file if it exists
+  if (!loadStateFile())
+  {
+    std::cout << "*** INFO: No state file found or failed to load, using original configuration only" << std::endl;
+  }
 
   return true;
 } /* Reflector::initialize */
@@ -472,8 +511,21 @@ void Reflector::requestQsy(ReflectorClient *client, uint32_t tg)
     if (tg == 0) { return; }
   }
 
-  cout << client->callsign() << ": Requesting QSY from TG #"
-       << current_tg << " to TG #" << tg << endl;
+  std::string msg = client->callsign() + ": Requesting QSY from TG #" + std::to_string(current_tg) + " to TG #" + std::to_string(tg);
+  cout << msg << endl;
+
+#ifdef HAVE_MQTT
+  if(m_mqtt_handler) {
+    Json::Value client_data;
+    client_data["callsign"] = client->callsign();
+    client_data["event"] = "qsy";
+    client_data["tg"] = tg;
+    client_data["from_tg"] = current_tg;
+    client_data["message"] = msg;
+
+    m_mqtt_handler->publishSystemEvent("qsy", client_data);
+  }
+#endif
 
   broadcastMsg(MsgRequestQsy(tg),
       ReflectorClient::mkAndFilter(
@@ -600,6 +652,15 @@ Async::SslX509 Reflector::signClientCsr(const std::string& cn)
     client->certificateUpdated(cert);
   }
 
+#ifdef HAVE_MQTT
+  if(m_mqtt_handler) {
+    Json::Value client_data;
+    client_data["callsign"] = cn;
+
+    m_mqtt_handler->publishSystemEvent("signed_csr", client_data);
+  }
+#endif
+
   return cert;
 } /* Reflector::signClientCsr */
 
@@ -667,9 +728,18 @@ bool Reflector::callsignOk(const std::string& callsign) const
   const std::regex accept_callsign_re(accept_cs_re_str);
   if (!std::regex_match(callsign, accept_callsign_re))
   {
-    std::cerr << "*** WARNING: The callsign '" << callsign
-              << "' is not accepted by configuration (ACCEPT_CALLSIGN)"
-              << std::endl;
+    std::string msg = "*** WARNING: The callsign '" + callsign + "' is not accepted by configuration (ACCEPT_CALLSIGN)";
+    std::cerr << msg << std::endl;
+#ifdef HAVE_MQTT
+    if(m_mqtt_handler) {
+      Json::Value client_data;
+      client_data["callsign"] = callsign;
+      client_data["event"] = "reject";
+      client_data["message"] = msg;
+
+      m_mqtt_handler->publishSystemEvent("callsigns", client_data);
+    }
+#endif
     return false;
   }
 
@@ -681,9 +751,19 @@ bool Reflector::callsignOk(const std::string& callsign) const
     const std::regex reject_callsign_re(reject_cs_re_str);
     if (std::regex_match(callsign, reject_callsign_re))
     {
-      std::cerr << "*** WARNING: The callsign '" << callsign
-                << "' has been rejected by configuration (REJECT_CALLSIGN)."
-                << std::endl;
+      std::string msg = "*** WARNING: The callsign '" + callsign + "' has been rejected by configuration (REJECT_CALLSIGN).";
+      std::cerr << msg << std::endl;
+
+#ifdef HAVE_MQTT
+      if(m_mqtt_handler) {
+        Json::Value client_data;
+        client_data["callsign"] = callsign;
+        client_data["event"] = "reject";
+        client_data["message"] = msg;
+
+        m_mqtt_handler->publishSystemEvent("callsigns", client_data);
+      }
+#endif
       return false;
     }
   }
@@ -770,12 +850,19 @@ Async::SslX509 Reflector::csrReceived(Async::SslCertSigningReq& req)
 
   if (!csr.isNull() && (req.publicKey() != csr.publicKey()))
   {
-    std::cerr << "*** WARNING: The received CSR with callsign '"
-              << callsign << "' has a different public key "
-                 "than the current CSR. That may be a sign of someone "
-                 "trying to hijack a callsign or the owner of the "
-                 "callsign has generated a new private/public key pair."
-              << std::endl;
+    std::string msg = "*** WARNING: The received CSR with callsign '" + callsign + 
+      "' has a different public key than the current CSR. That may be a sign of someone trying to hijack a callsign or the owner of the callsign has generated a new private/public key pair.";
+    std::cerr << msg << std::endl;
+#ifdef HAVE_MQTT
+    if(m_mqtt_handler) {
+      Json::Value client_data;
+      client_data["callsign"] = callsign;
+      client_data["event"] = "csr";
+      client_data["message"] = msg;
+
+      m_mqtt_handler->publishSystemEvent("warnings", client_data);
+    }
+#endif
     return nullptr;
   }
 
@@ -809,6 +896,14 @@ Async::SslX509 Reflector::csrReceived(Async::SslCertSigningReq& req)
           { "CA_OP",      ca_op },
           { "CA_CSR_PEM", req.pem() }
         });
+#ifdef HAVE_MQTT
+        if(m_mqtt_handler) {
+          Json::Value client_data;
+          client_data["callsign"] = callsign;
+
+          m_mqtt_handler->publishSystemEvent("pending_csr", client_data);
+        }
+#endif
     }
     else
     {
@@ -849,9 +944,31 @@ void Reflector::clientConnected(Async::FramedTcpConnection *con)
 {
   std::cout << con->remoteHost() << ":" << con->remotePort()
        << ": Client connected" << endl;
-  ReflectorClient *client = new ReflectorClient(this, con, m_cfg);
+  
+  ReflectorClient *client = new ReflectorClient(this, con, m_cfg
+#ifdef HAVE_MQTT
+  , m_mqtt_handler.get()
+#endif
+  );
+
   con->verifyPeer.connect(sigc::mem_fun(*this, &Reflector::onVerifyPeer));
   m_client_con_map[con] = client;
+
+#ifdef HAVE_MQTT
+  if(m_mqtt_handler) {
+
+    // Publish node connect event
+    Json::Value client_data;
+    client_data["host"] = con->remoteHost().toString();
+    client_data["port"] = con->remotePort();
+    client_data["event"] = "connect";
+
+    if(!client->callsign().empty())
+      client_data["callsign"] = client->callsign();
+
+    m_mqtt_handler->publishSystemEvent("connections", client_data);
+  }
+#endif
 } /* Reflector::clientConnected */
 
 
@@ -884,6 +1001,26 @@ void Reflector::clientDisconnected(Async::FramedTcpConnection *con,
         ReflectorClient::ExceptFilter(client));
   }
   //Application::app().runTask([=]{ delete client; });
+
+#ifdef HAVE_MQTT
+  if (m_mqtt_handler)
+  {
+      // Publish node disconnect event
+      Json::Value client_data;
+      client_data["host"] = con->remoteHost().toString();
+      client_data["port"] = con->remotePort();
+      client_data["reason"] = TcpConnection::disconnectReasonStr(reason);
+      client_data["event"] = "disconnect";
+      
+      if(!client->callsign().empty())
+        client_data["callsign"] = client->callsign();
+      
+      m_mqtt_handler->publishSystemEvent("connections", client_data);
+  }
+
+  updateConnectedNodes();
+#endif
+
   delete client;
 } /* Reflector::clientDisconnected */
 
@@ -1291,7 +1428,15 @@ void Reflector::onTalkerUpdated(uint32_t tg, ReflectorClient* old_talker,
 {
   if (old_talker != 0)
   {
-    cout << old_talker->callsign() << ": Talker stop on TG #" << tg << endl;
+    double duration = old_talker->getTalkingDuration();
+    cout << old_talker->callsign() << ": Talker stop on TG #" << tg;
+    if (duration > 0.0)
+    {
+      cout << " (duration: " << std::fixed << std::setprecision(2) 
+           << duration << "s)";
+    }
+    cout << endl;
+    
     old_talker->updateIsTalker();
     broadcastMsg(MsgTalkerStop(tg, old_talker->callsign()),
         ReflectorClient::mkAndFilter(
@@ -1299,15 +1444,33 @@ void Reflector::onTalkerUpdated(uint32_t tg, ReflectorClient* old_talker,
           ReflectorClient::mkOrFilter(
             ReflectorClient::TgFilter(tg),
             ReflectorClient::TgMonitorFilter(tg))));
+
     if (tg == tgForV1Clients())
     {
       broadcastMsg(MsgTalkerStopV1(old_talker->callsign()), v1_client_filter);
     }
+
     broadcastUdpMsg(MsgUdpFlushSamples(),
           ReflectorClient::mkAndFilter(
             ReflectorClient::TgFilter(tg),
             ReflectorClient::ExceptFilter(old_talker)));
+
+#ifdef HAVE_MQTT
+    if(m_mqtt_handler)
+    {
+      Json::Value client_data;
+      client_data["callsign"] = old_talker->callsign();
+      client_data["event"] = "stop";
+      if (duration > 0.0)
+      {
+        client_data["duration"] = duration;
+      }
+
+      m_mqtt_handler->publishSystemEvent("talker/" + std::to_string(tg), client_data);
+    }
+#endif
   }
+
   if (new_talker != 0)
   {
     cout << new_talker->callsign() << ": Talker start on TG #" << tg << endl;
@@ -1318,10 +1481,22 @@ void Reflector::onTalkerUpdated(uint32_t tg, ReflectorClient* old_talker,
           ReflectorClient::mkOrFilter(
             ReflectorClient::TgFilter(tg),
             ReflectorClient::TgMonitorFilter(tg))));
+
     if (tg == tgForV1Clients())
     {
       broadcastMsg(MsgTalkerStartV1(new_talker->callsign()), v1_client_filter);
     }
+
+#ifdef HAVE_MQTT
+    if(m_mqtt_handler)
+    {
+      Json::Value client_data;
+      client_data["callsign"] = new_talker->callsign();
+      client_data["event"] = "start";
+      
+      m_mqtt_handler->publishSystemEvent("talker/" + std::to_string(tg), client_data);
+    }
+#endif
   }
 } /* Reflector::onTalkerUpdated */
 
@@ -1395,6 +1570,18 @@ void Reflector::onRequestAutoQsy(uint32_t from_tg)
       ReflectorClient::mkAndFilter(
         ge_v2_client_filter,
         ReflectorClient::TgFilter(from_tg)));
+
+#ifdef HAVE_MQTT
+  if(m_mqtt_handler) {
+    Json::Value client_data;
+    client_data["event"] = "auto_qsy_request";
+    client_data["tg"] = tg;
+    client_data["from_tg"] = from_tg;
+
+    m_mqtt_handler->publishSystemEvent("qsy", client_data);
+  }
+#endif
+
 } /* Reflector::onRequestAutoQsy */
 
 
@@ -1425,6 +1612,184 @@ uint32_t Reflector::nextRandomQsyTg(void)
 } /* Reflector::nextRandomQsyTg */
 
 
+// Command handling methods (shared between PTY and MQTT)
+Reflector::CommandResponse Reflector::handleCfgCommand(std::istringstream& ss)
+{
+  std::string section, tag, value;
+  ss >> section >> tag >> value;
+  
+  if (!section.empty())
+  {
+    // Sections are all uppercase
+    std::transform(section.begin(), section.end(), section.begin(), ::toupper);
+  }
+
+  if (!value.empty())
+  {
+    // Tags are all uppercase, except when section is PASSWORDS! Passwords section is case sensitive!
+    if (section != "PASSWORDS")
+    {
+      std::transform(tag.begin(), tag.end(), tag.begin(), ::toupper);
+    }
+    
+    m_cfg->setValue(section, tag, value);
+    return {CommandResult::SUCCESS, "Configuration updated " + section + "/" + tag + "=\"" + value + "\""};
+  }
+  else if (!tag.empty())
+  {
+    std::string current_value = m_cfg->getValue(section, tag);
+    return {CommandResult::SUCCESS, section + "/" + tag + "=\"" + current_value + "\""};
+  }
+  else if (!section.empty())
+  {
+    std::ostringstream response;
+    response << "Configuration for section [" << section << "]:";
+    for (const auto& tag_name : m_cfg->listSection(section))
+    {
+      response << "\n  " << section << "/" << tag_name << "=\"" 
+               << m_cfg->getValue(section, tag_name) << "\"";
+    }
+    return {CommandResult::SUCCESS, response.str()};
+  }
+  else
+  {
+    std::ostringstream response;
+    response << "All configuration:";
+    for (const auto& section_name : m_cfg->listSections())
+    {
+      for (const auto& tag_name : m_cfg->listSection(section_name))
+      {
+        response << "\n  " << section_name << "/" << tag_name << "=\"" 
+                 << m_cfg->getValue(section_name, tag_name) << "\"";
+      }
+    }
+    return {CommandResult::SUCCESS, response.str()};
+  }
+}
+
+Reflector::CommandResponse Reflector::handleNodeCommand(std::istringstream& ss)
+{
+  std::string subcmd, callsign;
+  unsigned blocktime;
+  if (!(ss >> subcmd >> callsign >> blocktime))
+  {
+    return {CommandResult::ERROR, "Invalid NODE command. Usage: NODE BLOCK <callsign> <blocktime seconds>"};
+  }
+  
+  std::transform(subcmd.begin(), subcmd.end(), subcmd.begin(), ::toupper);
+  if (subcmd == "BLOCK")
+  {
+    auto node = ReflectorClient::lookup(callsign);
+    if (node == nullptr)
+    {
+      return {CommandResult::ERROR, "Could not find node " + callsign};
+    }
+    node->setBlock(blocktime);
+    return {CommandResult::SUCCESS, "Node " + callsign + " blocked for " + std::to_string(blocktime) + " seconds"};
+  }
+  else
+  {
+    return {CommandResult::ERROR, "Invalid NODE command. Usage: NODE BLOCK <callsign> <blocktime seconds>"};
+  }
+}
+
+Reflector::CommandResponse Reflector::handleCaCommand(std::istringstream& ss)
+{
+  std::string subcmd;
+  if (!(ss >> subcmd))
+  {
+    return {CommandResult::ERROR, "Invalid CA command. Usage: CA PENDING|SIGN <callsign>|LS|RM <callsign>"};
+  }
+  
+  std::transform(subcmd.begin(), subcmd.end(), subcmd.begin(), ::toupper);
+  if (subcmd == "SIGN")
+  {
+    std::string cn;
+    if (!(ss >> cn))
+    {
+      return {CommandResult::ERROR, "Invalid CA SIGN command. Usage: CA SIGN <callsign>"};
+    }
+    auto cert = signClientCsr(cn);
+    if (!cert.isNull())
+    {
+      return {CommandResult::SUCCESS, "Certificate signed for " + cn};
+    }
+    else
+    {
+      return {CommandResult::ERROR, "Certificate signing failed for " + cn};
+    }
+  }
+  else if (subcmd == "RM")
+  {
+    std::string cn;
+    if (!(ss >> cn))
+    {
+      return {CommandResult::ERROR, "Invalid CA RM command. Usage: CA RM <callsign>"};
+    }
+    if (removeClientCert(cn))
+    {
+      return {CommandResult::SUCCESS, "Removed client certificate and CSR for " + cn};
+    }
+    else
+    {
+      return {CommandResult::ERROR, "Failed to remove certificate and CSR for " + cn};
+    }
+  }
+  else if (subcmd == "LS")
+  {
+    return {CommandResult::ERROR, "CA LS command not yet implemented"};
+  }
+  else if (subcmd == "PENDING")
+  {
+    return {CommandResult::ERROR, "CA PENDING command not yet implemented"};
+  }
+  else
+  {
+    return {CommandResult::ERROR, "Invalid CA command. Usage: CA PENDING|SIGN <callsign>|LS|RM <callsign>"};
+  }
+}
+
+Reflector::CommandResponse Reflector::handleCfgSaveCommand()
+{
+  if (saveStateFile())
+  {
+    return {CommandResult::SUCCESS, "Configuration state saved successfully"};
+  }
+  else
+  {
+    return {CommandResult::ERROR, "Failed to save configuration state"};
+  }
+}
+
+Reflector::CommandResponse Reflector::handleCfgDiscardCommand()
+{
+  if (discardStateFile())
+  {
+    return {CommandResult::SUCCESS, "Configuration state discarded successfully"};
+  }
+  else
+  {
+    return {CommandResult::ERROR, "Failed to discard configuration state"};
+  }
+}
+
+Reflector::CommandResponse Reflector::handleCfgShowCommand()
+{
+  std::ostringstream response;
+  response << "Current configuration state:";
+  auto sections = m_cfg->listSections();
+  for (const auto& section : sections)
+  {
+    auto tags = m_cfg->listSection(section);
+    for (const auto& tag : tags)
+    {
+      std::string value = m_cfg->getValue(section, tag);
+      response << "\n  " << section << "/" << tag << "=\"" << value << "\"";
+    }
+  }
+  return {CommandResult::SUCCESS, response.str()};
+}
+
 void Reflector::ctrlPtyDataReceived(const void *buf, size_t count)
 {
   const char* ptr = reinterpret_cast<const char*>(buf);
@@ -1432,167 +1797,87 @@ void Reflector::ctrlPtyDataReceived(const void *buf, size_t count)
   //std::cout << "### Reflector::ctrlPtyDataReceived: " << cmdline
   //          << std::endl;
   std::istringstream ss(cmdline);
-  std::ostringstream errss;
   std::string cmd;
   if (!(ss >> cmd))
   {
-    errss << "Invalid PTY command '" << cmdline << "'";
-    goto write_status;
+    std::cerr << "*** ERROR: Invalid PTY command '" << cmdline << "'" << std::endl;
+    m_cmd_pty->write(std::string("ERR:Invalid PTY command '") + cmdline + "'\n");
+    return;
   }
   std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::toupper);
 
+  CommandResponse response;
+  
   if (cmd == "CFG")
   {
-    std::string section, tag, value;
-    ss >> section >> tag >> value;
-    if (!value.empty())
+    response = handleCfgCommand(ss);
+    // For PTY, print config values to console instead of returning them
+    if (response.result == CommandResult::SUCCESS && response.message.find("Configuration updated") == std::string::npos)
     {
-      m_cfg->setValue(section, tag, value);
+      std::cout << response.message << std::endl;
     }
-    else if (!tag.empty())
-    {
-      std::cout << section << "/" << tag << "=\""
-                << m_cfg->getValue(section, tag) << "\""
-                << std::endl;
-    }
-    else if (!section.empty())
-    {
-      for (const auto& tag : m_cfg->listSection(section))
-      {
-        std::cout << section << "/" << tag << "=\""
-                  << m_cfg->getValue(section, tag) << "\""
-                  << std::endl;
-      }
-    }
-    else
-    {
-      for (const auto& section : m_cfg->listSections())
-      {
-        for (const auto& tag : m_cfg->listSection(section))
-        {
-          std::cout << section << "/" << tag << "=\""
-                    << m_cfg->getValue(section, tag) << "\""
-                    << std::endl;
-        }
-      }
-    }
-    //if ((ss >> section >> tag >> value) || !ss.eof())
-    //{
-    //  errss << "Invalid CFG PTY command '" << cmdline << "'. "
-    //           "Usage: CFG <section> <tag> <value>";
-    //  goto write_status;
-    //}
   }
   else if (cmd == "NODE")
   {
-    std::string subcmd, callsign;
-    unsigned blocktime;
-    if (!(ss >> subcmd >> callsign >> blocktime))
-    {
-      errss << "Invalid NODE PTY command '" << cmdline << "'. "
-               "Usage: NODE BLOCK <callsign> <blocktime seconds>";
-      goto write_status;
-    }
-    std::transform(subcmd.begin(), subcmd.end(), subcmd.begin(), ::toupper);
-    if (subcmd == "BLOCK")
-    {
-      auto node = ReflectorClient::lookup(callsign);
-      if (node == nullptr)
-      {
-        errss << "Could not find node " << callsign;
-        goto write_status;
-      }
-      node->setBlock(blocktime);
-    }
-    else
-    {
-      errss << "Invalid NODE PTY command '" << cmdline << "'. "
-               "Usage: NODE BLOCK <callsign> <blocktime seconds>";
-      goto write_status;
-    }
+    response = handleNodeCommand(ss);
   }
   else if (cmd == "CA")
   {
-    std::string subcmd;
-    if (!(ss >> subcmd))
+    response = handleCaCommand(ss);
+    // Special handling for CA SIGN success - print certificate details
+    if (response.result == CommandResult::SUCCESS && response.message.find("Certificate signed") != std::string::npos)
     {
-      errss << "Invalid CA PTY command '" << cmdline << "'. "
-               "Usage: CA PENDING|SIGN <callsign>|LS|RM <callsign>";
-      goto write_status;
-    }
-    std::transform(subcmd.begin(), subcmd.end(), subcmd.begin(), ::toupper);
-    if (subcmd == "SIGN")
-    {
-      std::string cn;
-      if (!(ss >> cn))
-      {
-        errss << "Invalid CA SIGN PTY command '" << cmdline << "'. "
-                 "Usage: CA SIGN <callsign>";
-        goto write_status;
-      }
-      auto cert = signClientCsr(cn);
+      std::string cn = response.message.substr(response.message.find("for ") + 4);
+      auto cert = loadClientCertificate(cn);
       if (!cert.isNull())
       {
-        std::cout << "---------- Signed Client Certificate ----------"
-                  << std::endl;
+        std::cout << "---------- Signed Client Certificate ----------" << std::endl;
         cert.print(" ");
-        std::cout << "-----------------------------------------------"
-                  << std::endl;
-      }
-      else
-      {
-        errss << "Certificate signing failed";
+        std::cout << "-----------------------------------------------" << std::endl;
       }
     }
-    else if (subcmd == "RM")
+    // Special handling for CA RM success - print confirmation
+    else if (response.result == CommandResult::SUCCESS && response.message.find("Removed client certificate") != std::string::npos)
     {
-      std::string cn;
-      if (!(ss >> cn))
-      {
-        errss << "Invalid CA RM PTY command '" << cmdline << "'. "
-                 "Usage: CA RM <callsign>";
-        goto write_status;
-      }
-      if (removeClientCert(cn))
-
-      {
-        std::cout << cn << ": Removed client certificate and CSR"
-                  << std::endl;
-      }
-      else
-      {
-        errss << "Failed to remove certificate and CSR for '" << cn << "'";
-      }
+      std::string cn = response.message.substr(response.message.rfind(" ") + 1);
+      std::cout << cn << ": Removed client certificate and CSR" << std::endl;
     }
-    else if (subcmd == "LS")
+  }
+  else if (cmd == "CFG_SAVE")
+  {
+    response = handleCfgSaveCommand();
+    if (response.result == CommandResult::SUCCESS)
     {
-      errss << "Not yet implemented";
+      std::cout << response.message << std::endl;
     }
-    else if (subcmd == "PENDING")
+  }
+  else if (cmd == "CFG_DISCARD")
+  {
+    response = handleCfgDiscardCommand();
+    if (response.result == CommandResult::SUCCESS)
     {
-      errss << "Not yet implemented";
+      std::cout << response.message << std::endl;
     }
-    else
-    {
-      errss << "Invalid CA PTY command '" << cmdline << "'. "
-               "Usage: CA PENDING|SIGN <callsign>|LS|RM <callsign>";
-      goto write_status;
-    }
+  }
+  else if (cmd == "CFG_SHOW")
+  {
+    showConfigDiff();
+    response = {CommandResult::SUCCESS, ""};
   }
   else
   {
-    errss << "Unknown PTY command '" << cmdline
-          << "'. Valid commands are: CFG";
+    response = {CommandResult::ERROR, "Unknown PTY command '" + cmdline + "'. Valid commands are: CFG, CFG_SAVE, CFG_DISCARD, CFG_SHOW, NODE, CA"};
   }
 
-  write_status:
-    if (!errss.str().empty())
-    {
-      std::cerr << "*** ERROR: " << errss.str() << std::endl;
-      m_cmd_pty->write(std::string("ERR:") + errss.str() + "\n");
-      return;
-    }
+  if (response.result == CommandResult::ERROR)
+  {
+    std::cerr << "*** ERROR: " << response.message << std::endl;
+    m_cmd_pty->write(std::string("ERR:") + response.message + "\n");
+  }
+  else
+  {
     m_cmd_pty->write("OK\n");
+  }
 } /* Reflector::ctrlPtyDataReceived */
 
 
@@ -2258,7 +2543,447 @@ void Reflector::runCAHook(const Async::Exec::Environment& env)
 } /* Reflector::runCAHook */
 
 
+#ifdef HAVE_MQTT
+
+// MQTT integration methods
+bool Reflector::initMqtt()
+{
+    // Check if MQTT is enabled
+    m_mqtt_enabled = false;
+    m_cfg->getValue("GLOBAL", "MQTT_ENABLED", m_mqtt_enabled);
+    
+    if (!m_mqtt_enabled)
+    {
+        std::cout << "MQTT is disabled in configuration" << std::endl;
+        return false;
+    }
+    
+    // Read MQTT configuration
+    if (!m_cfg->getValue("GLOBAL", "MQTT_BROKER_HOST", m_mqtt_broker_host) ||
+        !m_cfg->getValue("GLOBAL", "MQTT_BROKER_PORT", m_mqtt_broker_port) ||
+        !m_cfg->getValue("GLOBAL", "MQTT_USERNAME", m_mqtt_username) ||
+        !m_cfg->getValue("GLOBAL", "MQTT_PASSWORD", m_mqtt_password))
+    {
+        std::cout << "MQTT configuration incomplete, MQTT support disabled" << std::endl;
+        return false;
+    }
+    
+    // Read MQTT topic prefix 
+    m_mqtt_topic_prefix = "";
+    m_cfg->getValue("GLOBAL", "MQTT_TOPIC_PREFIX", m_mqtt_topic_prefix);
+    
+    // Read MQTT SSL configuration
+    m_mqtt_ssl_enabled = false;
+    m_cfg->getValue("GLOBAL", "MQTT_SSL_ENABLED", m_mqtt_ssl_enabled);
+    
+    m_mqtt_ca_cert_file = "";
+    m_cfg->getValue("GLOBAL", "MQTT_CA_CERT_FILE", m_mqtt_ca_cert_file);
+    
+    m_mqtt_client_cert_file = "";
+    m_cfg->getValue("GLOBAL", "MQTT_CLIENT_CERT_FILE", m_mqtt_client_cert_file);
+    
+    m_mqtt_client_key_file = "";
+    m_cfg->getValue("GLOBAL", "MQTT_CLIENT_KEY_FILE", m_mqtt_client_key_file);
+    
+    m_mqtt_ssl_verify_hostname = true;
+    m_cfg->getValue("GLOBAL", "MQTT_SSL_VERIFY_HOSTNAME", m_mqtt_ssl_verify_hostname);
+    
+    // Generate unique client ID from server certificate
+    std::string client_id = generateMqttClientId();
+    if (client_id.empty())
+    {
+        std::cerr << "*** ERROR: Could not generate MQTT client ID from certificate" << std::endl;
+        return false;
+    }
+    
+    // Create MQTT handler
+    m_mqtt_handler = std::unique_ptr<MqttHandler>(new MqttHandler(this));
+    
+    // Set command callback
+    m_mqtt_handler->setCommandCallback([this](const std::string& command) {
+        this->handleMqttCommand(command);
+    });
+    
+    // Initialize MQTT connection
+    if (!m_mqtt_handler->init(m_mqtt_broker_host, m_mqtt_broker_port,
+                             m_mqtt_username, m_mqtt_password,
+                             client_id, m_mqtt_topic_prefix,
+                             m_mqtt_ssl_enabled, m_mqtt_ca_cert_file,
+                             m_mqtt_client_cert_file, m_mqtt_client_key_file,
+                             m_mqtt_ssl_verify_hostname))
+    {
+        return false;
+    }
+    
+    // Great, we're connected, let's publish our first heartbeat
+    publishMqttHeartbeat();
+    
+    return true;
+}
+
+void Reflector::handleMqttCommand(const std::string& command)
+{
+    std::cout << "handleMqttCommand: " << command << std::endl;
+
+    // Parse and execute command (similar to PTY command handling)
+    std::istringstream ss(command);
+    std::string cmd;
+    
+    if (!(ss >> cmd))
+    {
+        Json::Value client_data;
+        client_data["command"] = command;
+        client_data["message"] = "ERR:Invalid MQTT command '" + command + "'";
+        m_mqtt_handler->publishCommandReply(client_data);
+        return;
+    }
+    
+    std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::toupper);
+
+    CommandResponse cmdResponse;
+    std::string responsePrefix = "OK:";
+    
+    if (cmd == "CFG")
+    {
+        cmdResponse = handleCfgCommand(ss);
+    }
+    else if (cmd == "NODE")
+    {
+        cmdResponse = handleNodeCommand(ss);
+    }
+    else if (cmd == "CA")
+    {
+        cmdResponse = handleCaCommand(ss);
+    }
+    else if (cmd == "CFG_SAVE")
+    {
+        cmdResponse = handleCfgSaveCommand();
+    }
+    else if (cmd == "CFG_DISCARD")
+    {
+        cmdResponse = handleCfgDiscardCommand();
+    }
+    else if (cmd == "CFG_SHOW")
+    {
+        cmdResponse = handleCfgShowCommand();
+    }
+    else if (cmd == "STATUS")
+    {
+        publishStatusToMqtt();
+        cmdResponse = {CommandResult::SUCCESS, "Status published to MQTT"};
+    }
+    else if (cmd == "HELP")
+    {
+        std::cout << " Sending help" << std::endl;
+        cmdResponse = {CommandResult::SUCCESS, 
+            "Available MQTT commands:\n"
+            "  CFG [<section>] [<tag>] [<value>] - Configuration management\n"
+            "  CFG_SAVE - Save current configuration state\n"
+            "  CFG_DISCARD - Discard configuration state\n"
+            "  CFG_SHOW - Show current configuration state\n"
+            "  NODE BLOCK <callsign> <seconds> - Block a node\n"
+            "  CA SIGN <callsign> - Sign a certificate\n"
+            "  CA RM <callsign> - Remove a certificate\n"
+            "  STATUS - Show current status\n"
+            "  HELP - Show this help"};
+    }
+    else
+    {
+        cmdResponse = {CommandResult::ERROR, "Unknown MQTT command '" + command + "'. Use HELP for available commands"};
+    }
+
+    // Format response with appropriate prefix
+    std::string responseMessage;
+    if (cmdResponse.result == CommandResult::ERROR)
+    {
+        responseMessage = "ERR:" + cmdResponse.message;
+    }
+    else
+    {
+        responseMessage = "OK:" + cmdResponse.message;
+    }
+
+    Json::Value client_data;
+    client_data["command"] = command;
+    client_data["message"] = responseMessage;
+
+    m_mqtt_handler->publishCommandReply(client_data);
+}
+
+void Reflector::publishStatusToMqtt()
+{
+    if (m_mqtt_handler)
+        m_mqtt_handler->publishSystemEvent("status", m_status);
+}
+
+void Reflector::publishMqttHeartbeat()
+{
+  // We need to check if the client is connected, if not, we need to 
+  // reconnect, we try 3 times every heartbeat interval.
+
+  if(m_mqtt_handler == nullptr)
+  {
+    std::cout << "MQTT handler not initialized, probably an error occurred that could be fixed by now. Lets try again" << std::endl;
+    initMqtt();
+    return;
+  }
+
+  if (!m_mqtt_handler->isConnectedSafe())
+  {
+    std::cout << "MQTT not connected, attempting reconnect" << std::endl;
+    for(int i = 0; i < 3; i++)
+    {
+      if(m_mqtt_handler->reconnect())
+      {
+        std::cout << "MQTT reconnect successful" << std::endl;
+        break;
+      }
+    }
+    if(!m_mqtt_handler->isConnectedSafe())
+    {
+      std::cout << "MQTT reconnect failed, skipping heartbeat" << std::endl;
+      return;
+    }
+  }
+
+    // Log timestamp to debug heartbeat frequency
+    time_t now = time(NULL);
+    
+    if (m_mqtt_handler) {
+        int uptime = static_cast<int>(now - m_start_time);
+        m_mqtt_handler->publishHeartbeat(uptime);
+        publishStatusToMqtt();
+    }
+}
+
+// This might be thought of a bit better, maybe a hash from the public key ?
+// I don't know, for now it's good enough
+std::string Reflector::generateMqttClientId() const
+{
+    // Try to get the server certificate first
+    if (!m_crtfile.empty())
+    {
+        Async::SslX509 cert;
+        if (cert.readPemFile(m_crtfile) && !cert.isNull())
+        {
+            // Use certificate CN with validity dates for uniqueness
+            std::string cn = cert.commonName();
+            if (!cn.empty())
+            {
+                std::hash<std::string> hasher;
+                size_t hash = hasher(cn + std::to_string(cert.notBefore()) + std::to_string(cert.notAfter()));
+                std::string client_id = "reflector_" + std::to_string(hash);
+                std::cout << "Using certificate CN hash '" << client_id << "' as MQTT client ID" << std::endl;
+                return client_id;
+            }
+            
+            // Fallback: use certificate CN only
+            if (!cn.empty())
+            {
+                std::hash<std::string> hasher;
+                size_t hash = hasher(cn);
+                std::string client_id = "reflector_" + std::to_string(hash);
+                std::cout << "Using certificate CN only hash '" << client_id << "' as MQTT client ID" << std::endl;
+                return client_id;
+            }
+        }
+    }
+    
+    // Last resort: generate a hash-based ID from the certificate file path and hostname
+    if (!m_crtfile.empty())
+    {
+        // Get hostname for additional uniqueness
+        char hostname[256];
+        if (gethostname(hostname, sizeof(hostname)) == 0)
+        {
+            std::hash<std::string> hasher;
+            size_t hash = hasher(m_crtfile + std::string(hostname));
+            std::string client_id = "reflector_" + std::to_string(hash);
+            std::cout << "Using hostname+path hash '" << client_id << "' as MQTT client ID" << std::endl;
+            return client_id;
+        }
+        else
+        {
+            // Just use certificate file path hash
+            std::hash<std::string> hasher;
+            size_t hash = hasher(m_crtfile);
+            std::string client_id = "reflector_" + std::to_string(hash);
+            std::cout << "Using path hash '" << client_id << "' as MQTT client ID" << std::endl;
+            return client_id;
+        }
+    }
+    
+    std::cerr << "*** ERROR: Could not generate MQTT client ID - no certificate available" << std::endl;
+    return "";
+}
+
+void Reflector::updateConnectedNodes()
+{
+  vector<string> connected_nodes;
+  nodeList(connected_nodes);
+
+  Json::Value client_data;
+  Json::Value nodes_array(Json::arrayValue);
+  for (const auto& node : connected_nodes)
+  {
+    nodes_array.append(node);
+  }
+  client_data["nodes"] = nodes_array;
+
+  m_mqtt_handler->publishNodes(client_data);
+} /* Reflector::updateConnectedNodes */
+
+#endif
+
+/****************************************************************************
+ *
+ * Configuration state file management
+ *
+ ****************************************************************************/
+
+bool Reflector::loadStateFile(void)
+{
+  // Check if state file exists
+  if (access(m_state_file_path.c_str(), F_OK) != 0)
+  {
+    return false; // No state file exists, which is OK
+  }
+
+  // Create state config object
+  m_state_cfg = new Async::Config();
+  
+  // Try to load the state file
+  if (!m_state_cfg->open(m_state_file_path))
+  {
+    std::cerr << "*** WARNING: Failed to load state file '" << m_state_file_path 
+              << "', using original configuration only" << std::endl;
+    delete m_state_cfg;
+    m_state_cfg = 0;
+    return false;
+  }
+
+  std::cout << "Loading configuration state from '" << m_state_file_path << "'" << std::endl;
+
+  // Apply state file values over original config
+  // Iterate through all sections in state config
+  auto sections = m_state_cfg->listSections();
+  for (const auto& section : sections)
+  {
+    auto tags = m_state_cfg->listSection(section);
+    for (const auto& tag : tags)
+    {
+      std::string value;
+      if (m_state_cfg->getValue(section, tag, value))
+      {
+        // Apply the value to main config (this will trigger validation)
+        m_cfg->setValue(section, tag, value);
+        std::cout << "Applied state: " << section << "/" << tag << "=\"" << value << "\"" << std::endl;
+      }
+    }
+  }
+
+  return true;
+} /* Reflector::loadStateFile */
+
+
+bool Reflector::saveStateFile(void)
+{
+  // Check if we can write to the state file directory
+  std::string state_dir = m_state_file_path.substr(0, m_state_file_path.find_last_of('/'));
+  if (access(state_dir.c_str(), W_OK) != 0)
+  {
+    std::cerr << "*** ERROR: Cannot write to state file directory '" << state_dir << "'" << std::endl;
+    return false;
+  }
+
+  // Create a new config object to hold the complete current state
+  Async::Config state_config;
+  
+  // Copy all current values from main config to state config
+  auto sections = m_cfg->listSections();
+  for (const auto& section : sections)
+  {
+    auto tags = m_cfg->listSection(section);
+    for (const auto& tag : tags)
+    {
+      std::string value = m_cfg->getValue(section, tag);
+      state_config.setValue(section, tag, value);
+    }
+  }
+
+  // Write state config to file
+  // Note: Async::Config doesn't have a write method, so we'll implement a simple one
+  FILE* file = fopen(m_state_file_path.c_str(), "w");
+  if (file == nullptr)
+  {
+    std::cerr << "*** ERROR: Cannot open state file '" << m_state_file_path 
+              << "' for writing" << std::endl;
+    return false;
+  }
+
+  // Write all sections and values
+  for (const auto& section : sections)
+  {
+    fprintf(file, "[%s]\n", section.c_str());
+    auto tags = m_cfg->listSection(section);
+    for (const auto& tag : tags)
+    {
+      std::string value = m_cfg->getValue(section, tag);
+      fprintf(file, "%s=%s\n", tag.c_str(), value.c_str());
+    }
+    fprintf(file, "\n");
+  }
+
+  fclose(file);
+  
+  std::cout << "Configuration state saved to '" << m_state_file_path << "'" << std::endl;
+  return true;
+} /* Reflector::saveStateFile */
+
+
+bool Reflector::discardStateFile(void)
+{
+  // Delete the state file if it exists
+  if (access(m_state_file_path.c_str(), F_OK) == 0)
+  {
+    if (unlink(m_state_file_path.c_str()) == 0)
+    {
+      std::cout << "State file '" << m_state_file_path << "' deleted" << std::endl;
+    }
+    else
+    {
+      std::cerr << "*** ERROR: Failed to delete state file '" << m_state_file_path << "'" << std::endl;
+      return false;
+    }
+  }
+
+  // the state file was deleted, all configuration in memory will be lost if
+  // it's not saved. We'll keep them as they are just in case the user whishes
+  // to store them later on.
+
+  return true;
+} /* Reflector::discardStateFile */
+
+
+void Reflector::showConfigDiff(void)
+{
+  // This is a placeholder implementation
+  // In a real implementation, you would compare current config with original
+  std::cout << "Current configuration state:" << std::endl;
+  
+  auto sections = m_cfg->listSections();
+  for (const auto& section : sections)
+  {
+    auto tags = m_cfg->listSection(section);
+    for (const auto& tag : tags)
+    {
+      std::string value = m_cfg->getValue(section, tag);
+      std::cout << "  " << section << "/" << tag << "=\"" << value << "\"" << std::endl;
+    }
+  }
+} /* Reflector::showConfigDiff */
+
+
 /*
  * This file has not been truncated
  */
-

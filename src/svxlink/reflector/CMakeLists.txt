@@ -19,12 +19,26 @@ pkg_check_modules (JSONCPP REQUIRED jsoncpp)
 include_directories(${JSONCPP_INCLUDE_DIRS})
 set(LIBS ${LIBS} ${JSONCPP_LIBRARIES})
 
+# Find Paho MQTT C++ library (optional)
+# install libpaho-mqtt-dev and libpaho-mqttpp-dev to compile
+# required libpaho-mqtt and libpaho-mqttpp
+find_package(PahoMqttCpp QUIET)
+if(PahoMqttCpp_FOUND)
+  set(LIBS ${LIBS} PahoMqttCpp::paho-mqttpp3)
+  add_definitions(-DHAVE_MQTT)
+  set(MQTT_SOURCES MqttHandler.cpp)
+  message(STATUS "MQTT support enabled")
+else()
+  set(MQTT_SOURCES "")
+  message(STATUS "MQTT support disabled (PahoMqttCpp not found)")
+endif()
+
 # Add project libraries
 set(LIBS asynccpp asyncaudio asynccore svxmisc ${LIBS})
 
 # Build the executable
 add_executable(svxreflector
-  svxreflector.cpp Reflector.cpp ReflectorClient.cpp TGHandler.cpp
+  svxreflector.cpp Reflector.cpp ReflectorClient.cpp TGHandler.cpp ${MQTT_SOURCES}
 )
 target_link_libraries(svxreflector ${LIBS})
 set_target_properties(svxreflector PROPERTIES

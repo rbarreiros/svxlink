@@ -26,6 +26,19 @@ COMMAND_PTY=/dev/shm/reflector_ctrl
 #CERT_CA_CERTS_DIR=certs/
 CERT_CA_HOOK=@SVX_SHARE_INSTALL_DIR@/ca-hook.py
 
+# MQTT Configuration (optional)
+MQTT_ENABLED=0
+MQTT_BROKER_HOST=localhost
+MQTT_BROKER_PORT=1883
+MQTT_USERNAME=svxreflector
+MQTT_PASSWORD=your_password
+MQTT_TOPIC_PREFIX=reflector
+MQTT_SSL_ENABLED=0
+#MQTT_CA_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+#MQTT_CLIENT_CERT_FILE=/path/to/client.crt
+#MQTT_CLIENT_KEY_FILE=/path/to/client.key
+#MQTT_SSL_VERIFY_HOSTNAME=1
+
 [ROOT_CA]
 #KEYFILE=svxreflector_root_ca.key
 #CRTFILE=svxreflector_root_ca.crt

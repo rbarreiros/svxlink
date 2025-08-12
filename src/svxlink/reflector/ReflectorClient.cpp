@@ -63,6 +63,9 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "ReflectorClient.h"
 #include "Reflector.h"
 #include "TGHandler.h"
+#ifdef HAVE_MQTT
+#include "MqttHandler.h"
+#endif
 
 
 /****************************************************************************
@@ -183,7 +186,11 @@ bool ReflectorClient::TgFilter::operator()(ReflectorClient* client) const
 
 
 ReflectorClient::ReflectorClient(Reflector *ref, Async::FramedTcpConnection *con,
-                                 Async::Config *cfg)
+                                 Async::Config *cfg
+#ifdef HAVE_MQTT
+                                 , MqttHandler* mqtt_handler
+#endif
+                                 )
   : m_con(con), m_con_state(STATE_EXPECT_PROTO_VER),
     m_disc_timer(10000, Timer::TYPE_ONESHOT, false),
     m_client_id(newClientId(this)), m_remote_udp_port(0), m_cfg(cfg),
@@ -195,7 +202,12 @@ ReflectorClient::ReflectorClient(Reflector *ref, Async::FramedTcpConnection *con
     m_udp_heartbeat_rx_cnt(UDP_HEARTBEAT_RX_CNT_RESET),
     m_reflector(ref), m_blocktime(0), m_remaining_blocktime(0),
     m_current_tg(0), m_udp_cipher_iv_cntr(0)
+#ifdef HAVE_MQTT
+    , m_mqtt_handler(mqtt_handler)
+#endif
 {
+  // Added by Rui Barreiros | CR7BPM for talk duration in MQTT
+  timerclear(&m_talking_start_time);
   m_con->setMaxRxFrameSize(ReflectorMsg::MAX_PREAUTH_FRAME_SIZE);
   m_con->setMaxTxFrameSize(ReflectorMsg::MAX_POSTAUTH_FRAME_SIZE);
   m_con->sslConnectionReady.connect(
@@ -344,17 +356,61 @@ void ReflectorClient::setBlock(unsigned blocktime)
   }
   m_blocktime = blocktime;
   m_remaining_blocktime = blocktime;
+
+#ifdef HAVE_MQTT
+  if(m_mqtt_handler && !m_callsign.empty())
+  {
+    Json::Value client_data;
+    client_data["blocktime"] = blocktime;
+    client_data["event"] = (blocktime > 0) ? "mute" : "unmute";
+
+    m_mqtt_handler->publishNodeEvent("mute", m_callsign, client_data);
+  }
+#endif
+
 } /* ReflectorClient::setBlock */
 
-
+// Changed by Rui Barreiros | CR7BPM for talk duration in MQTT
 void ReflectorClient::updateIsTalker(void)
 {
   if (m_status != nullptr)
   {
     auto talker = TGHandler::instance()->talkerForTG(m_current_tg);
-    (*m_status)["isTalker"] = (talker == this);
+    bool is_talker = (talker == this);
+    bool was_talker = (*m_status).isMember("isTalker") && (*m_status)["isTalker"].asBool();
+    
+    (*m_status)["isTalker"] = is_talker;
+    
+    // Track when talking starts
+    if (is_talker && !was_talker)
+    {
+      gettimeofday(&m_talking_start_time, NULL);
+    }
   }
 } /* ReflectorClient:;updateIsTalker */
+
+// Added by Rui Barreiros | CR7BPM for talk duration in MQTT
+double ReflectorClient::getTalkingDuration(void) const
+{
+  // Check if currently talking
+  if (m_status != nullptr && 
+      m_status->isMember("isTalker") && 
+      (*m_status)["isTalker"].asBool() &&
+      !timerisset(&m_talking_start_time))
+  {
+    return 0.0;
+  }
+  
+  if (timerisset(&m_talking_start_time))
+  {
+    struct timeval now, duration;
+    gettimeofday(&now, NULL);
+    timersub(&now, &m_talking_start_time, &duration);
+    return duration.tv_sec + duration.tv_usec / 1000000.0;
+  }
+  
+  return 0.0;
+} /* ReflectorClient::getTalkingDuration */
 
 
 std::vector<uint8_t> ReflectorClient::udpCipherIV(void) const
@@ -735,6 +791,17 @@ void ReflectorClient::handleMsgAuthResponse(std::istream& is)
               << "' in MsgAuthResponse"
               << std::endl;
     sendError("Invalid callsign");
+
+#ifdef HAVE_MQTT
+    if(m_mqtt_handler && !m_callsign.empty())
+    {
+      Json::Value client_data;
+      client_data["status"] = "failed";
+      client_data["reason"] = "invalid_callsign";
+      m_mqtt_handler->publishNodeEvent("auth", m_callsign, client_data);
+    }
+#endif
+
     return;
   }
 
@@ -769,6 +836,17 @@ void ReflectorClient::handleMsgAuthResponse(std::istream& is)
               << m_con->remotePort() << "]: Authentication failed for user '"
               << msg.callsign() << "'" << std::endl;
     sendError("Access denied");
+
+#ifdef HAVE_MQTT
+    if(m_mqtt_handler && !m_callsign.empty())
+    {
+      Json::Value client_data;
+      client_data["status"] = "failed";
+      client_data["reason"] = "invalid_auth_key";
+      m_mqtt_handler->publishNodeEvent("auth", m_callsign, client_data);
+    }
+#endif
+
   }
 } /* ReflectorClient::handleMsgAuthResponse */
 
@@ -869,6 +947,17 @@ void ReflectorClient::handleSelectTG(std::istream& is)
     }
 
     setTg(msg.tg());
+
+#ifdef HAVE_MQTT
+    if(m_mqtt_handler && !m_callsign.empty())
+    {
+      Json::Value client_data;
+      client_data["tg"] = msg.tg();
+  
+      m_mqtt_handler->publishNodeEvent("selected_tg", m_callsign, client_data);
+    }
+#endif
+  
   }
 } /* ReflectorClient::handleSelectTG */
 
@@ -902,6 +991,23 @@ void ReflectorClient::handleTgMonitor(std::istream& is)
   cout << "]" << endl;
 
   setMonitoredTGs(tgs);
+
+#ifdef HAVE_MQTT
+  if(m_mqtt_handler && !m_callsign.empty())
+  {
+    Json::Value client_data;
+    Json::Value tgs_array(Json::arrayValue);
+    for (const auto& tg : tgs)
+    {
+      tgs_array.append(tg);
+    }
+    client_data["tgs"] = tgs_array;
+    
+    m_mqtt_handler->publishNodeEvent("monitored_tgs", m_callsign, client_data);
+  }
+#endif
+
+
 } /* ReflectorClient::handleTgMonitor */
 
 
@@ -1000,7 +1106,17 @@ void ReflectorClient::handleNodeInfo(std::istream& is)
         }
       }
     }
+
+#ifdef HAVE_MQTT
+  if(m_mqtt_handler && !m_callsign.empty())
+  {
+    Json::Value client_data;
+    std::istringstream json_stream(jsonstr);
+    json_stream >> client_data;
+    m_mqtt_handler->publishNodeEvent("info", m_callsign, client_data);
   }
+#endif
+}
   catch (const Json::Exception& e)
   {
     std::cerr << "*** WARNING[" << m_callsign
@@ -1035,6 +1151,20 @@ void ReflectorClient::handleMsgSignalStrengthValues(std::istream& is)
     setRxEnabled(rx.id(), rx.enabled());
     setRxSqlOpen(rx.id(), rx.sqlOpen());
     setRxActive(rx.id(), rx.active());
+
+#ifdef HAVE_MQTT
+    if(m_mqtt_handler && !m_callsign.empty())
+    {
+      Json::Value client_data;
+      client_data["rx_id"] = rx.id();
+      client_data["siglev"] = rx.siglev();
+      client_data["enabled"] = rx.enabled();
+      client_data["sql_open"] = rx.sqlOpen();
+      client_data["active"] = rx.active();
+
+      m_mqtt_handler->publishNodeEvent("signal", m_callsign, client_data);
+    }
+#endif
   }
 } /* ReflectorClient::handleMsgSignalStrengthValues */
 
@@ -1072,6 +1202,18 @@ void ReflectorClient::handleRequestQsy(std::istream& is)
     return;
   }
   m_reflector->requestQsy(this, msg.tg());
+
+#ifdef HAVE_MQTT
+  if(m_mqtt_handler && !m_callsign.empty())
+  {
+    Json::Value client_data;
+    client_data["tg"] = msg.tg();
+    client_data["status"] = "request";
+
+    m_mqtt_handler->publishNodeEvent("qsy", m_callsign, client_data);
+  }
+#endif
+
 } /* ReflectorClient::handleRequestQsy */
 
 
@@ -1192,6 +1334,16 @@ void ReflectorClient::handleMsgError(std::istream& is)
     cout << m_con->remoteHost() << ":" << m_con->remotePort() << " ";
   }
   cout << "Error message received from client: " << message << endl;
+
+#ifdef HAVE_MQTT
+  if(m_mqtt_handler && !m_callsign.empty())
+  {
+    Json::Value client_data;
+    client_data["message"] = message;
+    m_mqtt_handler->publishNodeEvent("error", m_callsign, client_data);
+  }
+#endif
+
   disconnect();
 } /* ReflectorClient::handleMsgError */
 
@@ -1209,6 +1361,18 @@ void ReflectorClient::sendError(const std::string& msg)
 void ReflectorClient::onDiscTimeout(Timer *t)
 {
   assert(m_con_state == STATE_EXPECT_DISCONNECT);
+
+#ifdef HAVE_MQTT
+  if(m_mqtt_handler && !m_callsign.empty())
+  {
+    Json::Value client_data;
+    client_data["message"] = "TCP heartbeat timeout";
+    client_data["reason"] = "timeout";
+
+    m_mqtt_handler->publishNodeEvent("disconnect", m_callsign, client_data);
+  }
+#endif
+
   disconnect();
 } /* ReflectorClient::onDiscTimeout */
 
@@ -1220,6 +1384,10 @@ void ReflectorClient::disconnect(void)
   m_con->disconnect();
   m_con_state = STATE_DISCONNECTED;
   m_con->disconnected(m_con, FramedTcpConnection::DR_ORDERED_DISCONNECT);
+
+#ifdef HAVE_MQTT
+  m_reflector->updateConnectedNodes();
+#endif
 } /* ReflectorClient::disconnect */
 
 
@@ -1286,6 +1454,17 @@ std::string ReflectorClient::lookupUserKey(const std::string& callsign)
   {
     cout << "*** WARNING: Unknown user \"" << callsign << "\""
          << endl;
+
+#ifdef HAVE_MQTT
+    if(m_mqtt_handler && !m_callsign.empty())
+    {
+      Json::Value client_data;
+      client_data["status"] = "failed";
+      client_data["reason"] = "unknown_user";
+      m_mqtt_handler->publishNodeEvent("auth", m_callsign, client_data);
+    }
+#endif
+
     return "";
   }
   string auth_key;
@@ -1294,8 +1473,19 @@ std::string ReflectorClient::lookupUserKey(const std::string& callsign)
     cout << "*** ERROR: User \"" << callsign << "\" found in SvxReflector "
          << "configuration but password with groupname \"" << auth_group
          << "\" not found." << endl;
-    return "";
+
+#ifdef HAVE_MQTT
+    if(m_mqtt_handler && !m_callsign.empty())
+    {
+      Json::Value client_data;
+      client_data["status"] = "failed";
+      client_data["reason"] = "unknown_password";
+      m_mqtt_handler->publishNodeEvent("auth", m_callsign, client_data);
+    }
+#endif
+         return "";
   }
+
   return auth_key;
 } /* ReflectorClient::lookupUserKey */
 
@@ -1316,6 +1506,16 @@ void ReflectorClient::connectionAuthenticated(const std::string& callsign)
          << "." << m_client_proto_ver.minorVer()
          << endl;
     m_con_state = STATE_CONNECTED;
+
+#ifdef HAVE_MQTT
+    if(m_mqtt_handler && !m_callsign.empty())
+    {
+      Json::Value client_data;
+      client_data["status"] = "success";
+      m_mqtt_handler->publishNodeEvent("auth", m_callsign, client_data);
+    }
+    m_reflector->updateConnectedNodes();
+#endif
 
     assert(client_callsign_map.find(m_callsign) == client_callsign_map.end());
     client_callsign_map[m_callsign] = this;
