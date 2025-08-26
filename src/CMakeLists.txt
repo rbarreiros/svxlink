@@ -259,28 +259,55 @@ endfunction(install_mkdir)
 # overwrite it.
 #   install_if_not_exists(source_file destination_directory)
 function(install_if_not_exists src dest)
-  if(NOT IS_ABSOLUTE "${src}")
-    set(src "${CMAKE_CURRENT_SOURCE_DIR}/${src}")
+  # Store original values to prevent variable contamination
+  set(_orig_src "${src}")
+  set(_orig_dest "${dest}")
+  
+  if(NOT IS_ABSOLUTE "${_orig_src}")
+    set(_orig_src "${CMAKE_CURRENT_SOURCE_DIR}/${_orig_src}")
   endif()
-  get_filename_component(src_name "${src}" NAME)
-  if (NOT IS_ABSOLUTE "${dest}")
-    set(dest "${CMAKE_INSTALL_PREFIX}/${dest}")
+  get_filename_component(src_name "${_orig_src}" NAME)
+  
+  if (NOT IS_ABSOLUTE "${_orig_dest}")
+    set(_orig_dest "${CMAKE_INSTALL_PREFIX}/${_orig_dest}")
   endif()
-  set(CONFIG_FILES "${CONFIG_FILES}${dest}/${src_name} "
-	  CACHE INTERNAL "CONFIG_FILES")
+  
+  # Ensure the destination path is clean and properly formed
+  string(REGEX REPLACE "/+" "/" _clean_dest "${_orig_dest}")
+  
+  # Get current CONFIG_FILES value safely
+  get_property(_current_config_files CACHE CONFIG_FILES PROPERTY VALUE)
+  if(NOT _current_config_files)
+    set(_current_config_files "")
+  endif()
+  
+  # Append to CONFIG_FILES safely
+  set(_new_config_files "${_current_config_files}${_clean_dest}/${src_name} ")
+  set(CONFIG_FILES "${_new_config_files}" CACHE INTERNAL "CONFIG_FILES" FORCE)
+	  
   install(CODE "
-    if(NOT EXISTS \"\$ENV{DESTDIR}${dest}/${src_name}\")
-      #file(INSTALL \"${src}\" DESTINATION \"${dest}\")
-      message(STATUS \"Installing: \$ENV{DESTDIR}${dest}/${src_name}\")
-      execute_process(COMMAND \${CMAKE_COMMAND} -E copy \"${src}\"
-                      \"\$ENV{DESTDIR}${dest}/${src_name}\"
+    set(_install_dest \"${_clean_dest}\")
+    set(_install_src \"${_orig_src}\")
+    set(_install_name \"${src_name}\")
+    set(_full_dest \"\$ENV{DESTDIR}\${_install_dest}/\${_install_name}\")
+    
+    # Clean up any double slashes in the final path
+    string(REGEX REPLACE \"/+\" \"/\" _full_dest \"\${_full_dest}\")
+    
+    if(NOT EXISTS \"\${_full_dest}\")
+      message(STATUS \"Installing: \${_full_dest}\")
+      # Ensure destination directory exists
+      get_filename_component(_dest_dir \"\${_full_dest}\" DIRECTORY)
+      file(MAKE_DIRECTORY \"\${_dest_dir}\")
+      execute_process(COMMAND \${CMAKE_COMMAND} -E copy \"\${_install_src}\"
+                      \"\${_full_dest}\"
                       RESULT_VARIABLE copy_result
                       ERROR_VARIABLE error_output)
       if(copy_result)
         message(FATAL_ERROR \${error_output})
       endif()
     else()
-      message(STATUS \"Skipping  : \$ENV{DESTDIR}${dest}/${src_name}\")
+      message(STATUS \"Skipping  : \${_full_dest}\")
     endif()
   ")
 endfunction(install_if_not_exists)
