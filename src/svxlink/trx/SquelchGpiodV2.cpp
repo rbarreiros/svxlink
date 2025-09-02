@@ -32,6 +32,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 #include <cstring>
 #include <cerrno>
+#include <gpiod.hpp>
 #include <iostream>
 #include <sstream>
 
@@ -109,7 +110,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 SquelchGpiod::SquelchGpiod(void)
-  : m_timer(100, Async::Timer::TYPE_PERIODIC)
+  : m_timer(100, Async::Timer::TYPE_PERIODIC),
+  m_line_offset(0)
 {
 } /* SquelchGpiod::SquelchGpiod */
 
@@ -117,9 +119,6 @@ SquelchGpiod::SquelchGpiod(void)
 SquelchGpiod::~SquelchGpiod(void)
 {
   m_timer.setEnable(false);
-  
-  m_line.reset();
-  m_chip.reset();
 } /* SquelchGpiod::~SquelchGpiod */
 
 
@@ -154,9 +153,7 @@ bool SquelchGpiod::initialize(Async::Config& cfg, const std::string& rx_name)
 
   try
   {
-    // Open the GPIO chip
-    m_chip = std::make_unique<gpiod::chip>(chip);
-    
+
     // Get the line
     int line_num = -1;
     std::istringstream is(line);
@@ -164,35 +161,42 @@ bool SquelchGpiod::initialize(Async::Config& cfg, const std::string& rx_name)
     
     if (!is.fail() && is.eof())
     {
-      // Line specified as number
-      m_line = std::make_unique<gpiod::line>(m_chip->get_line(line_num));
+      // Line is as number
+      if(line_num > 0)
+        m_line_offset = line_num;
     }
     else
     {
-      // Line specified as name
-      m_line = std::make_unique<gpiod::line>(m_chip->find_line(line));
+      // Find line by name
+      line_num = ::gpiod::chip(chip)
+                      .get_line_offset_from_name(line);
+
+      if(line_num > 0)
+        m_line_offset = line_num;
     }
 
-    // Configure the line for input
-    gpiod::line_request_config req_cfg;
-    req_cfg.consumer = "SvxLink";
-    req_cfg.request_type = gpiod::line_request::DIRECTION_INPUT;
-    req_cfg.flags = active_low ? gpiod::line_request::FLAG_ACTIVE_LOW : 0;
+    if (line_num == -1) {
+      std::cerr << "*** ERROR: Get GPIOD line \"" << line 
+                << "\" failed for RX " << rx_name << ": "
+                << rx_name << ": " << std::strerror(errno) << std::endl;
+      return false;
+    }
 
-    // Handle bias configuration
+    // bias
+    ::gpiod::line::bias gpiod_bias = ::gpiod::line::bias::UNKNOWN;
     if (!bias.empty())
     {
       if (bias == "PULLUP")
       {
-        req_cfg.flags |= gpiod::line_request::FLAG_BIAS_PULL_UP;
+        gpiod_bias = ::gpiod::line::bias::PULL_UP;
       }
       else if (bias == "PULLDOWN")
       {
-        req_cfg.flags |= gpiod::line_request::FLAG_BIAS_PULL_DOWN;
+        gpiod_bias = ::gpiod::line::bias::PULL_DOWN;
       }
       else if (bias == "DISABLE")
       {
-        req_cfg.flags |= gpiod::line_request::FLAG_BIAS_DISABLE;
+        gpiod_bias = ::gpiod::line::bias::DISABLED;
       }
       else
       {
@@ -204,39 +208,52 @@ bool SquelchGpiod::initialize(Async::Config& cfg, const std::string& rx_name)
       }
     }
 
-    // Request the line
-    m_line->request(req_cfg, 0);
+
+    auto lr = ::gpiod::chip(chip)
+                .prepare_request()
+                .set_consumer("SvxLink")
+                .add_line_settings(
+                  m_line_offset,
+                  ::gpiod::line_settings()
+                    .set_direction(
+                      ::gpiod::line::direction::INPUT
+                    )
+                    .set_bias(gpiod_bias)
+                    .set_edge_detection(
+                      ::gpiod::line::edge::BOTH
+                    )
+                    .set_debounce_period(
+                      std::chrono::milliseconds(10)
+                    )
+                    .set_active_low(active_low)
+                )
+                .do_request();
+
+    m_line_request = &lr;
 
     // Set up periodic timer to read GPIO value
     m_timer.expired.connect([&](Async::Timer*) {
           try
           {
-            int val = m_line->get_value();
-            setSignalDetected(val > 0);
-          }
-          catch (const gpiod::exception& e)
-          {
-            std::cerr << "*** WARNING: Read GPIOD line failed for RX \"" 
-                      << rx_name << "\": " << e.what() << std::endl;
+            ::gpiod::line::value val = 
+              m_line_request->get_value(m_line_offset);
+
+            setSignalDetected(
+              (val == ::gpiod::line::value::ACTIVE) ? 
+                true : false);
           }
           catch (const std::exception& e)
           {
-            std::cerr << "*** WARNING: Unexpected error reading GPIOD line for RX \"" 
+            std::cerr << "*** WARNING: Read GPIOD line failed for RX \"" 
                       << rx_name << "\": " << e.what() << std::endl;
           }
         });
 
     m_timer.setEnable(true);
   }
-  catch (const gpiod::exception& e)
-  {
-    std::cerr << "*** ERROR: GPIOD operation failed for RX \"" << rx_name 
-              << "\": " << e.what() << std::endl;
-    return false;
-  }
   catch (const std::exception& e)
   {
-    std::cerr << "*** ERROR: Unexpected error for RX \"" << rx_name 
+    std::cerr << "*** ERROR: GPIOD operation failed for RX \"" << rx_name 
               << "\": " << e.what() << std::endl;
     return false;
   }

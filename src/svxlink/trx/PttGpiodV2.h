@@ -141,9 +141,8 @@ class PttGpiod : public Ptt
     virtual bool setTxOn(bool tx_on);
 
   private:
-    std::unique_ptr<gpiod::chip>  m_chip;
-    std::unique_ptr<gpiod::line>  m_line;
-
+    ::gpiod::line::offset m_line_offset;
+    ::gpiod::line_request *m_line_request;
 };  /* class PttGpiod */
 
 

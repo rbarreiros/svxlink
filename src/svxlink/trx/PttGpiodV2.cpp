@@ -32,6 +32,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 #include <cstring>
 #include <cerrno>
+#include <filesystem>
+#include <gpiod.hpp>
 #include <iostream>
 #include <sstream>
 
@@ -109,21 +111,63 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 PttGpiod::PttGpiod(void)
+  : m_line_offset(0)
 {
 } /* PttGpiod::PttGpiod */
 
 
 PttGpiod::~PttGpiod(void)
 {
-  m_line.reset();
-  m_chip.reset();
 } /* PttGpiod::~PttGpiod */
 
 
 bool PttGpiod::initialize(Async::Config &cfg, const std::string name)
 {
-  std::string chip("gpiochip0");
+  std::filesystem::path chip_path("/dev/gpiochip0");
+  std::string chip;
+  
   cfg.getValue(name, "PTT_GPIOD_CHIP", chip);
+  if(chip.rfind("/dev/", 0)  == 0)
+  {
+    chip_path = chip;
+  } else {
+    chip_path = "/dev/" + chip;
+  }
+
+  // Check if the GPIO chip path exists and is readable
+  if (!std::filesystem::exists(chip_path))
+  {
+    std::cerr << "*** ERROR: GPIO chip path does not exist: " 
+              << chip_path << std::endl;
+    return false;
+  }
+
+  // Check if it's a character device (typical for GPIO chips)
+  if (!std::filesystem::is_character_file(chip_path))
+  {
+    std::cerr << "*** ERROR: GPIO chip path is not a character device: " 
+              << chip_path << std::endl;
+    return false;
+  }
+
+  // Check if the file is readable
+  std::error_code ec;
+  auto perms = std::filesystem::status(chip_path, ec).permissions();
+  if (ec)
+  {
+    std::cerr << "*** ERROR: Cannot check permissions for GPIO chip: " 
+              << chip_path << " - " << ec.message() << std::endl;
+    return false;
+  }
+
+  if ((perms & std::filesystem::perms::owner_read) == std::filesystem::perms::none &&
+      (perms & std::filesystem::perms::group_read) == std::filesystem::perms::none &&
+      (perms & std::filesystem::perms::others_read) == std::filesystem::perms::none)
+  {
+    std::cerr << "*** ERROR: GPIO chip is not readable: " 
+              << chip_path << std::endl;
+    return false;
+  }
 
   std::string line;
   if (!cfg.getValue(name, "PTT_GPIOD_LINE", line) || line.empty())
@@ -143,9 +187,6 @@ bool PttGpiod::initialize(Async::Config &cfg, const std::string name)
 
   try
   {
-    // Open the GPIO chip
-    m_chip = std::make_unique<gpiod::chip>(chip);
-    
     // Get the line
     int line_num = -1;
     std::istringstream is(line);
@@ -153,33 +194,51 @@ bool PttGpiod::initialize(Async::Config &cfg, const std::string name)
     
     if (!is.fail() && is.eof())
     {
-      // Line specified as number
-      m_line = std::make_unique<gpiod::line>(m_chip->get_line(line_num));
+      // Line is a number
+      m_line_offset = line_num;
     }
     else
     {
-      // Line specified as name
-      m_line = std::make_unique<gpiod::line>(m_chip->find_line(line));
+      // Find line by name
+      int line_num = ::gpiod::chip(chip_path)
+                      .get_line_offset_from_name(line);
+
+      if(line_num > 0)
+        m_line_offset = line_num;
     }
 
-    // Configure the line for output
-    gpiod::line_request_config req_cfg;
-    req_cfg.consumer = "SvxLink";
-    req_cfg.request_type = gpiod::line_request::DIRECTION_OUTPUT;
-    req_cfg.flags = active_low ? gpiod::line_request::FLAG_ACTIVE_LOW : 0;
+    if (line_num == -1)
+    {
+      std::cerr << "*** ERROR: Get GPIOD line \"" << line
+                << "\" failed for TX " << name << ": "
+                << std::strerror(errno) << std::endl;
+      return false;
+    }
 
-    // Request the line
-    m_line->request(req_cfg, active_low ? 1 : 0);
-  }
-  catch (const gpiod::exception& e)
-  {
-    std::cerr << "*** ERROR: GPIOD operation failed for TX " << name 
-              << ": " << e.what() << std::endl;
-    return false;
+    std::cout << "Setting up GPIOD with : " << std::endl
+              << "Chip: " << chip_path << std::endl
+              << "Line: " << line << std::endl
+              << "Line offset: " << m_line_offset << std::endl
+              << "Active low: " << active_low << std::endl;
+
+    auto lr = ::gpiod::chip(chip)
+        .prepare_request()
+        .set_consumer("SvxLink")
+        .add_line_settings(
+          m_line_offset,
+          ::gpiod::line_settings()
+            .set_direction(
+              ::gpiod::line::direction::OUTPUT
+            )
+            .set_active_low(active_low)
+        )
+        .do_request();
+
+    m_line_request = &lr;
   }
   catch (const std::exception& e)
   {
-    std::cerr << "*** ERROR: Unexpected error for TX " << name 
+    std::cerr << "*** ERROR: GPIOD operation failed for TX " << name 
               << ": " << e.what() << std::endl;
     return false;
   }
@@ -190,21 +249,25 @@ bool PttGpiod::initialize(Async::Config &cfg, const std::string name)
 
 bool PttGpiod::setTxOn(bool tx_on)
 {
-  try
-  {
-    m_line->set_value(tx_on ? 1 : 0);
-  }
-  catch (const gpiod::exception& e)
+  if (!m_line_request)
   {
     std::cerr << "*** WARNING: PttGpiod::setTxOn: "
-                 "gpiod_line_set_value failed: "
-              << e.what() << std::endl;
+                 "line request not initialized" << std::endl;
     return false;
+  }
+
+  try
+  {
+    std::cout << "Setting GPIOD line " << m_line_offset << " to " << (tx_on ? "ACTIVE" : "INACTIVE") << std::endl;
+
+    //m_line_request->set_value(m_line_offset, tx_on ? 
+    //  ::gpiod::line::value::ACTIVE : ::gpiod::line::value::INACTIVE);
+    m_line_request->set_value(7, ::gpiod::line::value::ACTIVE);
   }
   catch (const std::exception& e)
   {
     std::cerr << "*** WARNING: PttGpiod::setTxOn: "
-                 "Unexpected error: "
+                 "gpiod_line_set_value failed: "
               << e.what() << std::endl;
     return false;
   }

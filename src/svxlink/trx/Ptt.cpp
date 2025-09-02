@@ -147,7 +147,7 @@ Ptt *PttFactoryBase::createNamedPtt(Config& cfg, const string& name)
 #ifdef HAS_HIDRAW_SUPPORT
   PttHidraw::Factory hidraw_ptt_factory;
 #endif
-#ifdef HAS_GPIOD_V2_SUPPORT or HAS_GPIOD_SUPPORT
+#if defined(HAS_GPIOD_V2_SUPPORT) | defined(HAS_GPIOD_SUPPORT)
   PttGpiod::Factory gpiod_ptt_factory;
 #endif
 

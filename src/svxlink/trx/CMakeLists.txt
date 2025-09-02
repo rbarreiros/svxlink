@@ -64,21 +64,24 @@ endif (RTLSDR_FOUND)
 # Find GPIOD v2 (C++ bindings) first - preferred version
 find_package(PkgConfig)
 if(PkgConfig_FOUND)
-  pkg_check_modules(GPIOD_V2 gpiodcxx)
+  pkg_check_modules(GPIOD_V2 libgpiodcxx)
 else()
   set(GPIOD_V2_FOUND FALSE)
-endif()
 
-# Find GPIOD v1 (C API) as fallback
-find_package(GPIOD 1 EXACT)
+  # Find GPIOD v1 (C API) as fallback
+  find_package(GPIOD 1 EXACT)
+endif()
 
 # Use v2 if available, otherwise use v1
 if (GPIOD_V2_FOUND)
+  # Well, libgpiod C++ bindings require C++17
+  set(CMAKE_CXX_STANDARD 17)
+  set(CMAKE_CXX_STANDARD_REQUIRED ON)
   set(LIBS ${LIBS} ${GPIOD_V2_LIBRARIES})
   include_directories(${GPIOD_V2_INCLUDE_DIRS})
   add_definitions(${GPIOD_V2_CFLAGS_OTHER} -DHAS_GPIOD_V2_SUPPORT)
   set(LIBSRC ${LIBSRC} PttGpiodV2.cpp SquelchGpiodV2.cpp)
-  message(STATUS "Found libgpiod v2 (C++ bindings) - using modern C++ implementation")
+  message(STATUS "Found libgpiod v2 (C++ bindings)")
 elseif (GPIOD_FOUND)
   set(LIBS ${LIBS} ${GPIOD_LIBRARIES})
   include_directories(${GPIOD_INCLUDE_DIRS})
