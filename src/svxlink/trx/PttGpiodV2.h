@@ -142,7 +142,7 @@ class PttGpiod : public Ptt
 
   private:
     ::gpiod::line::offset m_line_offset;
-    ::gpiod::line_request *m_line_request;
+    std::unique_ptr<::gpiod::line_request> m_line_request;
 };  /* class PttGpiod */
 
 

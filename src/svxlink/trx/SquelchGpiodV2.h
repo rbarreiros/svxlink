@@ -137,9 +137,9 @@ class SquelchGpiod : public Squelch
 
   private:
     Async::Timer        m_timer;
-    
+
     ::gpiod::line::offset m_line_offset;
-    ::gpiod::line_request *m_line_request;
+    std::unique_ptr<::gpiod::line_request> m_line_request;
 };  /* class SquelchGpiod */
 
 

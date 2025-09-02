@@ -129,8 +129,16 @@ bool SquelchGpiod::initialize(Async::Config& cfg, const std::string& rx_name)
     return false;
   }
 
-  std::string chip("gpiochip0");
+  std::filesystem::path chip_path("/dev/gpiochip0");
+  std::string chip;
+  
   cfg.getValue(rx_name, "SQL_GPIOD_CHIP", chip);
+  if(chip.rfind("/dev/", 0)  == 0)
+  {
+    chip_path = chip;
+  } else {
+    chip_path = "/dev/" + chip;
+  }
 
   std::string line;
   if (!cfg.getValue(rx_name, "SQL_GPIOD_LINE", line) || line.empty())
@@ -175,7 +183,7 @@ bool SquelchGpiod::initialize(Async::Config& cfg, const std::string& rx_name)
         m_line_offset = line_num;
     }
 
-    if (line_num == -1) {
+    if (line_num < 0) {
       std::cerr << "*** ERROR: Get GPIOD line \"" << line 
                 << "\" failed for RX " << rx_name << ": "
                 << rx_name << ": " << std::strerror(errno) << std::endl;
@@ -209,7 +217,8 @@ bool SquelchGpiod::initialize(Async::Config& cfg, const std::string& rx_name)
     }
 
 
-    auto lr = ::gpiod::chip(chip)
+    m_line_request = std::make_unique<::gpiod::line_request>(
+      ::gpiod::chip(chip_path)
                 .prepare_request()
                 .set_consumer("SvxLink")
                 .add_line_settings(
@@ -227,9 +236,9 @@ bool SquelchGpiod::initialize(Async::Config& cfg, const std::string& rx_name)
                     )
                     .set_active_low(active_low)
                 )
-                .do_request();
+                .do_request()
+              );
 
-    m_line_request = &lr;
 
     // Set up periodic timer to read GPIO value
     m_timer.expired.connect([&](Async::Timer*) {
