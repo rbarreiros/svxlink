@@ -30,20 +30,17 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  ****************************************************************************/
 
-#include <cstring>
 #include <cerrno>
+#include <cstring>
 #include <gpiod.hpp>
 #include <iostream>
 #include <sstream>
-
 
 /****************************************************************************
  *
  * Project Includes
  *
  ****************************************************************************/
-
-
 
 /****************************************************************************
  *
@@ -53,15 +50,11 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 #include "SquelchGpiodV2.h"
 
-
-
 /****************************************************************************
  *
  * Namespaces to use
  *
  ****************************************************************************/
-
-
 
 /****************************************************************************
  *
@@ -69,15 +62,11 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  ****************************************************************************/
 
-
-
 /****************************************************************************
  *
  * Local class definitions
  *
  ****************************************************************************/
-
-
 
 /****************************************************************************
  *
@@ -85,23 +74,17 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  ****************************************************************************/
 
-
-
 /****************************************************************************
  *
  * Exported Global Variables
  *
  ****************************************************************************/
 
-
-
 /****************************************************************************
  *
  * Local Global Variables
  *
  ****************************************************************************/
-
-
 
 /****************************************************************************
  *
@@ -110,39 +93,35 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 SquelchGpiod::SquelchGpiod(void)
-  : m_timer(100, Async::Timer::TYPE_PERIODIC),
-  m_line_offset(0)
+    : m_timer(100, Async::Timer::TYPE_PERIODIC), 
+    m_line_offset(0) 
 {
 } /* SquelchGpiod::SquelchGpiod */
 
-
-SquelchGpiod::~SquelchGpiod(void)
-{
+SquelchGpiod::~SquelchGpiod(void) {
   m_timer.setEnable(false);
+
+  m_line_request->release();
+  m_line_request.reset();
 } /* SquelchGpiod::~SquelchGpiod */
 
-
-bool SquelchGpiod::initialize(Async::Config& cfg, const std::string& rx_name)
-{
-  if (!Squelch::initialize(cfg, rx_name))
-  {
+bool SquelchGpiod::initialize(Async::Config &cfg, const std::string &rx_name) {
+  if (!Squelch::initialize(cfg, rx_name)) {
     return false;
   }
 
   std::filesystem::path chip_path("/dev/gpiochip0");
   std::string chip;
-  
+
   cfg.getValue(rx_name, "SQL_GPIOD_CHIP", chip);
-  if(chip.rfind("/dev/", 0)  == 0)
-  {
+  if (chip.rfind("/dev/", 0) == 0) {
     chip_path = chip;
   } else {
     chip_path = "/dev/" + chip;
   }
 
   std::string line;
-  if (!cfg.getValue(rx_name, "SQL_GPIOD_LINE", line) || line.empty())
-  {
+  if (!cfg.getValue(rx_name, "SQL_GPIOD_LINE", line) || line.empty()) {
     std::cerr << "*** ERROR: Config variable " << rx_name
               << "/SQL_GPIOD_LINE not set or an illegal value was specified"
               << std::endl;
@@ -150,8 +129,7 @@ bool SquelchGpiod::initialize(Async::Config& cfg, const std::string& rx_name)
   }
 
   bool active_low = false;
-  if (line[0] == '!')
-  {
+  if (line[0] == '!') {
     active_low = true;
     line.erase(0, 1);
   }
@@ -159,55 +137,42 @@ bool SquelchGpiod::initialize(Async::Config& cfg, const std::string& rx_name)
   std::string bias;
   cfg.getValue(rx_name, "SQL_GPIOD_BIAS", bias);
 
-  try
-  {
+  try {
 
     // Get the line
     int line_num = -1;
     std::istringstream is(line);
     is >> line_num;
-    
-    if (!is.fail() && is.eof())
-    {
-      // Line is as number
-      if(line_num > 0)
-        m_line_offset = line_num;
-    }
-    else
-    {
-      // Find line by name
-      line_num = ::gpiod::chip(chip)
-                      .get_line_offset_from_name(line);
 
-      if(line_num > 0)
+    if (!is.fail() && is.eof()) {
+      // Line is as number
+      if (line_num > 0)
+        m_line_offset = line_num;
+    } else {
+      // Find line by name
+      line_num = ::gpiod::chip(chip).get_line_offset_from_name(line);
+
+      if (line_num > 0)
         m_line_offset = line_num;
     }
 
     if (line_num < 0) {
-      std::cerr << "*** ERROR: Get GPIOD line \"" << line 
-                << "\" failed for RX " << rx_name << ": "
-                << rx_name << ": " << std::strerror(errno) << std::endl;
+      std::cerr << "*** ERROR: Get GPIOD line \"" << line << "\" failed for RX "
+                << rx_name << ": " << rx_name << ": " << std::strerror(errno)
+                << std::endl;
       return false;
     }
 
     // bias
     ::gpiod::line::bias gpiod_bias = ::gpiod::line::bias::UNKNOWN;
-    if (!bias.empty())
-    {
-      if (bias == "PULLUP")
-      {
+    if (!bias.empty()) {
+      if (bias == "PULLUP") {
         gpiod_bias = ::gpiod::line::bias::PULL_UP;
-      }
-      else if (bias == "PULLDOWN")
-      {
+      } else if (bias == "PULLDOWN") {
         gpiod_bias = ::gpiod::line::bias::PULL_DOWN;
-      }
-      else if (bias == "DISABLE")
-      {
+      } else if (bias == "DISABLE") {
         gpiod_bias = ::gpiod::line::bias::DISABLED;
-      }
-      else
-      {
+      } else {
         std::cerr << "*** ERROR: Config variable " << rx_name
                   << "/SQL_GPIOD_BIAS has an illegal value specified. "
                      "Valid values are: DISABLE, PULLUP and PULLDOWN."
@@ -216,53 +181,45 @@ bool SquelchGpiod::initialize(Async::Config& cfg, const std::string& rx_name)
       }
     }
 
+    std::cout << "Creating a line request with: " << std::endl
+              << "Chip: " << chip_path << std::endl
+              << "Line offset: " << m_line_offset << std::endl
+              << "Active low: " << active_low << std::endl
+              << "Bias: " << bias << std::endl;
 
     m_line_request = std::make_unique<::gpiod::line_request>(
-      ::gpiod::chip(chip_path)
-                .prepare_request()
-                .set_consumer("SvxLink")
-                .add_line_settings(
-                  m_line_offset,
-                  ::gpiod::line_settings()
-                    .set_direction(
-                      ::gpiod::line::direction::INPUT
-                    )
+        ::gpiod::chip(chip_path)
+            .prepare_request()
+            .set_consumer("SvxLink")
+            .add_line_settings(
+                m_line_offset,
+                ::gpiod::line_settings()
+                    .set_direction(::gpiod::line::direction::INPUT)
                     .set_bias(gpiod_bias)
-                    .set_edge_detection(
-                      ::gpiod::line::edge::BOTH
-                    )
-                    .set_debounce_period(
-                      std::chrono::milliseconds(10)
-                    )
-                    .set_active_low(active_low)
-                )
-                .do_request()
-              );
-
+                    //.set_edge_detection(::gpiod::line::edge::BOTH)
+                    //.set_debounce_period(std::chrono::milliseconds(10))
+                    .set_active_low(active_low))
+            .do_request());
 
     // Set up periodic timer to read GPIO value
-    m_timer.expired.connect([&](Async::Timer*) {
-          try
-          {
-            ::gpiod::line::value val = 
-              m_line_request->get_value(m_line_offset);
+    m_timer.expired.connect([&](Async::Timer *) {
+      try {
+        ::gpiod::line::value val = m_line_request->get_value(m_line_offset);
 
-            setSignalDetected(
-              (val == ::gpiod::line::value::ACTIVE) ? 
-                true : false);
-          }
-          catch (const std::exception& e)
-          {
-            std::cerr << "*** WARNING: Read GPIOD line failed for RX \"" 
-                      << rx_name << "\": " << e.what() << std::endl;
-          }
-        });
+        setSignalDetected((val == ::gpiod::line::value::ACTIVE) ? true : false);
+      } catch (const std::exception &e) {
+        std::cerr << "*** WARNING: Read GPIOD line failed for RX \"" << rx_name
+                  << "\": " << e.what() << std::endl;
+      }
+    });
 
     m_timer.setEnable(true);
-  }
-  catch (const std::exception& e)
-  {
-    std::cerr << "*** ERROR: GPIOD operation failed for RX \"" << rx_name 
+  } catch (const ::gpiod::bad_mapping &e) {
+    std::cerr << "*** ERROR: GPIOD bad mapping for RX \"" << rx_name
+              << "\": " << e.what() << std::endl;
+    return false;
+  } catch (const std::exception &e) {
+    std::cerr << "*** ERROR: GPIOD operation failed for RX \"" << rx_name
               << "\": " << e.what() << std::endl;
     return false;
   }
@@ -270,14 +227,11 @@ bool SquelchGpiod::initialize(Async::Config& cfg, const std::string& rx_name)
   return true;
 } /* SquelchGpiod::initialize */
 
-
 /****************************************************************************
  *
  * Private member functions
  *
  ****************************************************************************/
-
-
 
 /*
  * This file has not been truncated

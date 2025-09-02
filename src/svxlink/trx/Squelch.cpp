@@ -145,7 +145,7 @@ Squelch* createSquelch(const std::string& sql_name)
   static SquelchSpecificFactory<SquelchHidraw> hidraw_factory;
 #endif
   static SquelchSpecificFactory<SquelchCombine> combine_factory;
-#ifdef HAS_GPIOD_SUPPORT
+#if defined(HAS_GPIOD_V2_SUPPORT) | defined(HAS_GPIOD_SUPPORT)
   static SquelchSpecificFactory<SquelchGpiod> gpiod_factory;
 #endif
 
