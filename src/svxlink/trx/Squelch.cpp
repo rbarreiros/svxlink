@@ -60,8 +60,11 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #ifdef HAS_HIDRAW_SUPPORT
 #include "SquelchHidraw.h"
 #endif
+#ifdef HAS_GPIOD_V2_SUPPORT
+#include "SquelchGpiodV2.h"
+#endif
 #ifdef HAS_GPIOD_SUPPORT
-#include "SquelchGpiod.h"
+#include "SquelchGpiodV1.h"
 #endif
 #include "Squelch.h"
 

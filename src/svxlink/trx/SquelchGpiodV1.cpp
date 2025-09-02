@@ -48,7 +48,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  ****************************************************************************/
 
-#include "SquelchGpiod.h"
+#include "SquelchGpiodV1.h"
 
 
 
@@ -164,36 +164,12 @@ bool SquelchGpiod::initialize(Async::Config& cfg, const std::string& rx_name)
   std::string bias;
   if (cfg.getValue(rx_name, "SQL_GPIOD_BIAS", bias))
   {
-#if (GPIOD_VERSION_MAJOR >= 2) || \
-    ((GPIOD_VERSION_MAJOR == 1) && (GPIOD_VERSION_MINOR >= 5))
-    if (bias == "PULLUP")
-    {
-      req_cfg.flags |= GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_UP;
-    }
-    else if (bias == "PULLDOWN")
-    {
-      req_cfg.flags |= GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_DOWN;
-    }
-    else if (bias == "DISABLE")
-    {
-      req_cfg.flags |= GPIOD_LINE_REQUEST_FLAG_BIAS_DISABLE;
-    }
-    else
-    {
-      std::cerr << "*** ERROR: Config variable " << rx_name
-                << "/SQL_GPIOD_BIAS has an illegal value specified. "
-                   "Valid values are: DISABLE, PULLUP and PULLDOWN."
-                << std::endl;
-      return false;
-    }
-#else
     std::cerr << "*** WARNING: Config variable " << rx_name
               << "/SQL_GPIOD_BIAS has been specified but the version "
                  "of libgpiod that SvxLink was compiled with ("
               << GPIOD_VERSION_MAJOR << "." << GPIOD_VERSION_MINOR
               << ") does not support configuring BIAS. Need libgpiod >= 1.5."
               << std::endl;
-#endif
   }
 
   m_chip = gpiod_chip_open_lookup(chip.c_str());

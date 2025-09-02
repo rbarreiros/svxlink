@@ -50,7 +50,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  ****************************************************************************/
 
-#include "PttGpiod.h"
+#include "PttGpiodV2.h"
 
 
 
@@ -115,17 +115,8 @@ PttGpiod::PttGpiod(void)
 
 PttGpiod::~PttGpiod(void)
 {
-  if (m_line != nullptr)
-  {
-    gpiod_line_release(m_line);
-    m_line = nullptr;
-  }
-
-  if (m_chip != nullptr)
-  {
-    gpiod_chip_close(m_chip);
-    m_chip = nullptr;
-  }
+  m_line.reset();
+  m_chip.reset();
 } /* PttGpiod::~PttGpiod */
 
 
@@ -133,11 +124,6 @@ bool PttGpiod::initialize(Async::Config &cfg, const std::string name)
 {
   std::string chip("gpiochip0");
   cfg.getValue(name, "PTT_GPIOD_CHIP", chip);
-
-  struct gpiod_line_request_config req_cfg;
-  req_cfg.consumer = "SvxLink";
-  req_cfg.request_type = GPIOD_LINE_REQUEST_DIRECTION_OUTPUT;
-  req_cfg.flags = 0;
 
   std::string line;
   if (!cfg.getValue(name, "PTT_GPIOD_LINE", line) || line.empty())
@@ -147,48 +133,54 @@ bool PttGpiod::initialize(Async::Config &cfg, const std::string name)
               << std::endl;
     return false;
   }
+
   bool active_low = false;
   if (line[0] == '!')
   {
     active_low = true;
     line.erase(0, 1);
-    req_cfg.flags |= GPIOD_LINE_REQUEST_FLAG_ACTIVE_LOW;
   }
 
-  m_chip = gpiod_chip_open_lookup(chip.c_str());
-  if (m_chip == nullptr)
+  try
   {
-    std::cerr << "*** ERROR: Open GPIOD chip \"" << chip
-              << "\" failed for TX " << name << ": "
-              << std::strerror(errno) << std::endl;
+    // Open the GPIO chip
+    m_chip = std::make_unique<gpiod::chip>(chip);
+    
+    // Get the line
+    int line_num = -1;
+    std::istringstream is(line);
+    is >> line_num;
+    
+    if (!is.fail() && is.eof())
+    {
+      // Line specified as number
+      m_line = std::make_unique<gpiod::line>(m_chip->get_line(line_num));
+    }
+    else
+    {
+      // Line specified as name
+      m_line = std::make_unique<gpiod::line>(m_chip->find_line(line));
+    }
+
+    // Configure the line for output
+    gpiod::line_request_config req_cfg;
+    req_cfg.consumer = "SvxLink";
+    req_cfg.request_type = gpiod::line_request::DIRECTION_OUTPUT;
+    req_cfg.flags = active_low ? gpiod::line_request::FLAG_ACTIVE_LOW : 0;
+
+    // Request the line
+    m_line->request(req_cfg, active_low ? 1 : 0);
+  }
+  catch (const gpiod::exception& e)
+  {
+    std::cerr << "*** ERROR: GPIOD operation failed for TX " << name 
+              << ": " << e.what() << std::endl;
     return false;
   }
-
-  int line_num = -1;
-  std::istringstream is(line);
-  is >> line_num;
-  if (!is.fail() && is.eof())
+  catch (const std::exception& e)
   {
-    m_line = gpiod_chip_get_line(m_chip, line_num);
-  }
-  else
-  {
-    m_line = gpiod_chip_find_line(m_chip, line.c_str());
-  }
-  if (!m_line)
-  {
-    std::cerr << "*** ERROR: Get GPIOD line \"" << line_num
-              << "\" failed for TX " << name << ": "
-              << std::strerror(errno) << std::endl;
-    return false;
-  }
-
-  int ret = gpiod_line_request(m_line, &req_cfg, active_low ? 1 : 0);
-  if (ret < 0)
-  {
-    std::cerr << "*** ERROR: Set GPIOD line \"" << line_num
-              << "\" to output failed for TX " << name << ": "
-              << std::strerror(errno) << std::endl;
+    std::cerr << "*** ERROR: Unexpected error for TX " << name 
+              << ": " << e.what() << std::endl;
     return false;
   }
 
@@ -198,14 +190,22 @@ bool PttGpiod::initialize(Async::Config &cfg, const std::string name)
 
 bool PttGpiod::setTxOn(bool tx_on)
 {
-  //cerr << "### PttGpiod::setTxOn(" << (tx_on ? "true" : "false") << ")\n";
-
-  int ret = gpiod_line_set_value(m_line, tx_on ? 1 : 0);
-  if (ret < 0)
+  try
+  {
+    m_line->set_value(tx_on ? 1 : 0);
+  }
+  catch (const gpiod::exception& e)
   {
     std::cerr << "*** WARNING: PttGpiod::setTxOn: "
                  "gpiod_line_set_value failed: "
-              << std::strerror(errno) << std::endl;
+              << e.what() << std::endl;
+    return false;
+  }
+  catch (const std::exception& e)
+  {
+    std::cerr << "*** WARNING: PttGpiod::setTxOn: "
+                 "Unexpected error: "
+              << e.what() << std::endl;
     return false;
   }
 
