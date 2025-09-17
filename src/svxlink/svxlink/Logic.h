@@ -116,6 +116,7 @@ class EventHandler;
 class Command;
 class QsoRecorder;
 class DtmfDigitHandler;
+class TOTPValidator;
 
 
 /****************************************************************************
@@ -284,6 +285,7 @@ class Logic : public LogicBase
     bool                            is_online;
     std::string                     online_cmd;
     DtmfDigitHandler                *dtmf_digit_handler;
+    TOTPValidator                   *totp_validator;
     Async::Pty                      *state_pty;
     Async::Pty                      *dtmf_ctrl_pty;
     std::map<uint16_t, uint32_t>    m_ctcss_to_tg;

@@ -91,6 +91,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "QsoRecorder.h"
 //#include "LinkManager.h"
 #include "DtmfDigitHandler.h"
+#include "TOTPAuth.h"
 
 
 /****************************************************************************
@@ -168,8 +169,9 @@ Logic::Logic(void)
     qso_recorder(0),                        tx_ctcss(TX_CTCSS_ALWAYS),
     tx_ctcss_mask(0),
     currently_set_tx_ctrl_mode(Tx::TX_OFF), is_online(true),
-    dtmf_digit_handler(0),                  state_pty(0),
-    dtmf_ctrl_pty(0),                       command_pty(0),
+    dtmf_digit_handler(0),                  totp_validator(0),
+    state_pty(0),                           dtmf_ctrl_pty(0),
+    command_pty(0),
     m_ctcss_to_tg_timer(-1),                m_ctcss_to_tg_last_fq(0.0f)
 {
   rgr_sound_timer.expired.connect(sigc::hide(
@@ -676,6 +678,71 @@ bool Logic::initialize(Async::Config& cfgobj, const std::string& logic_name)
   exec_cmd_on_sql_close_timer.expired.connect(sigc::hide(
       mem_fun(dtmf_digit_handler, &DtmfDigitHandler::forceCommandComplete)));
 
+  // Initialize TOTP validator
+  totp_validator = new TOTPValidator;
+  
+  // Check if TOTP is required for this logic
+  int totp_required = 0;
+  cfg().getValue(name(), "TOTP_REQUIRED", totp_required);
+  
+  if (totp_required)
+  {
+    // Read TOTP_AUTH configuration
+    int time_window = 30;
+    int totp_length = 6;
+    int tolerance_windows = 1;
+    int auth_timeout = 300;
+    
+    cfg().getValue("TOTP_AUTH", "TIME_WINDOW", time_window);
+    cfg().getValue("TOTP_AUTH", "TOTP_LENGTH", totp_length);
+    cfg().getValue("TOTP_AUTH", "TOLERANCE_WINDOWS", tolerance_windows);
+    cfg().getValue(name(), "TOTP_AUTH_TIMEOUT", auth_timeout); // Logic-specific timeout
+    
+    // Initialize validator with configuration
+    if (!totp_validator->initialize(time_window, totp_length, tolerance_windows, auth_timeout))
+    {
+      cerr << "*** ERROR: TOTP validator initialization failed for logic " << name() << endl;
+      cleanup();
+      return false;
+    }
+    
+    // Load TOTP users
+    list<string> totp_user_keys = cfg().listSection("TOTP_USERS");
+    bool users_loaded = false;
+    
+    for (const string& key : totp_user_keys)
+    {
+      if (key.find("_SECRET") != string::npos)
+      {
+        // Extract user ID from key (e.g., "CR7BPM_SECRET" -> "CR7BPM")
+        string user_id = key.substr(0, key.find("_SECRET"));
+        
+        string secret;
+        string user_name = user_id; // Default name is the user ID
+        
+        if (cfg().getValue("TOTP_USERS", key, secret))
+        {
+          // Try to get user name
+          string name_key = user_id + "_NAME";
+          cfg().getValue("TOTP_USERS", name_key, user_name);
+          
+          if (totp_validator->addUser(user_id, user_name, secret))
+          {
+            users_loaded = true;
+          }
+        }
+      }
+    }
+    
+    if (!users_loaded)
+    {
+      cerr << "*** WARNING: TOTP required but no valid users configured for logic " << name() << endl;
+    }
+    
+    // Re-initialize to update enabled status based on loaded users
+    totp_validator->initialize(time_window, totp_length, tolerance_windows, auth_timeout);
+  }
+
   int ctcss_to_tg_delay = 1000;
   cfg().getValue(name(), "CTCSS_TO_TG_DELAY", ctcss_to_tg_delay);
   m_ctcss_to_tg_timer.setTimeout(ctcss_to_tg_delay);
@@ -1035,6 +1102,7 @@ Logic::~Logic(void)
   delete logic_con_out;
   delete logic_con_in;
   delete dtmf_digit_handler;
+  delete totp_validator;
 } /* Logic::~Logic */
 
 
@@ -1682,6 +1750,26 @@ void Logic::dtmfDigitDetectedP(char digit, int duration)
   {
     dtmf_digit_handler->digitReceived(digit);
     return;
+  }
+
+  // Process TOTP authentication first (only for RF DTMF, not PTY)
+  // PTY DTMF should bypass TOTP as it's for local control
+  if (totp_validator->isEnabled())
+  {
+    // Try to process digit for TOTP authentication
+    if (totp_validator->processDtmfDigit(digit))
+    {
+      // Digit was consumed for TOTP authentication
+      cout << name() << ": DTMF digit consumed for TOTP authentication" << endl;
+      return;
+    }
+    
+    // Check if user is authenticated before processing commands
+    if (!totp_validator->isAuthenticated())
+    {
+      cout << name() << ": DTMF command blocked - TOTP authentication required" << endl;
+      return;
+    }
   }
 
   stringstream ss;
