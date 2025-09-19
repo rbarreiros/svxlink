@@ -62,6 +62,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 #include "AsyncConfig.h"
+#include "AsyncConfigFactory.h"
+#include "AsyncConfigManager.h"
 
 
 
@@ -128,97 +130,117 @@ Config::~Config(void)
 } /* Config::~Config */
 
 
-bool Config::open(const string& name)
+bool Config::open(const string& config_dir)
 {
-  errno = 0;
-
-  FILE *file = fopen(name.c_str(), "r");
-  if (file == NULL)
+  ConfigManager manager;
+  
+  // Initialize backend using db.conf
+  m_backend = manager.initializeBackend(config_dir);
+  if (m_backend == nullptr)
   {
+    cerr << "*** FATAL ERROR: " << manager.getLastError() << endl;
+    cerr << "*** APPLICATION ABORTING: Cannot initialize configuration backend" << endl;
+    exit(1);  // Abort application as requested
+  }
+
+  // Load all configuration data into memory for subscription support
+  loadFromBackend();
+
+  return true;
+} /* Config::open */
+
+bool Config::openDirect(const string& source)
+{
+  // Create the appropriate backend using the factory (legacy method)
+  m_backend = ConfigFactory::createBackend(source);
+  if (m_backend == nullptr)
+  {
+    cerr << "*** ERROR: Failed to create configuration backend for: " << source << endl;
     return false;
   }
 
-  bool success = parseCfgFile(file);
+  cout << "Using " << m_backend->getBackendType() << " configuration backend: " 
+       << m_backend->getBackendInfo() << endl;
 
-  fclose(file);
-  file = NULL;
+  // Load all configuration data into memory for subscription support
+  loadFromBackend();
 
-  return success;
-
-} /* Config::open */
+  return true;
+} /* Config::openDirect */
 
 
 bool Config::getValue(const std::string& section, const std::string& tag,
                       std::string& value, bool missing_ok) const
 {
-  Sections::const_iterator sec_it = sections.find(section);
-  if (sec_it == sections.end())
+  // First try to get from in-memory cache (for subscriptions)
+  Sections::const_iterator sec_it = m_sections.find(section);
+  if (sec_it != m_sections.end())
   {
-    return missing_ok;
+    Values::const_iterator val_it = sec_it->second.find(tag);
+    if (val_it != sec_it->second.end())
+    {
+      value = val_it->second.val;
+      return true;
+    }
   }
 
-  Values::const_iterator val_it = sec_it->second.find(tag);
-  if (val_it == sec_it->second.end())
+  // If not in cache, try to get from backend
+  if (m_backend != nullptr && m_backend->isOpen())
   {
-    return missing_ok;
+    if (m_backend->getValue(section, tag, value))
+    {
+      return true;
+    }
   }
 
-  value = val_it->second.val;
-  return true;
+  return missing_ok;
 } /* Config::getValue */
 
 
 bool Config::getValue(const std::string& section, const std::string& tag,
                       char& value, bool missing_ok) const
 {
-  Sections::const_iterator sec_it = sections.find(section);
-  if (sec_it == sections.end())
+  string str_value;
+  if (!getValue(section, tag, str_value, missing_ok))
   {
     return missing_ok;
   }
 
-  Values::const_iterator val_it = sec_it->second.find(tag);
-  if (val_it == sec_it->second.end())
-  {
-    return missing_ok;
-  }
-
-  if (val_it->second.val.size() != 1)
+  if (str_value.size() != 1)
   {
     return false;
   }
 
-  value = val_it->second.val[0];
+  value = str_value[0];
   return true;
 } /* Config::getValue */
 
 
 const string &Config::getValue(const string& section, const string& tag) const
 {
-  static const string empty_strng;
+  static string cached_value;
   
-  Sections::const_iterator sec_it = sections.find(section);
-  if (sec_it == sections.end())
+  if (getValue(section, tag, cached_value, true))
   {
-    return empty_strng;
+    return cached_value;
   }
-
-  Values::const_iterator val_it = sec_it->second.find(tag);
-  if (val_it == sec_it->second.end())
-  {
-    return empty_strng;
-  }
-
-  return val_it->second.val;
+  
+  static const string empty_string;
+  return empty_string;
 } /* Config::getValue */
 
 
 list<string> Config::listSections(void)
 {
-  list<string> section_list;
-  for (Sections::const_iterator it=sections.begin(); it!=sections.end(); ++it)
+  if (m_backend != nullptr && m_backend->isOpen())
   {
-    section_list.push_back((*it).first);
+    return m_backend->listSections();
+  }
+  
+  list<string> section_list;
+  for (Sections::const_iterator it = m_sections.begin(); it != m_sections.end(); ++it)
+  {
+    section_list.push_back(it->first);
   }
   return section_list;
 } /* Config::listSections */
@@ -226,32 +248,43 @@ list<string> Config::listSections(void)
 
 list<string> Config::listSection(const string& section)
 {
+  if (m_backend != nullptr && m_backend->isOpen())
+  {
+    return m_backend->listSection(section);
+  }
+  
   list<string> tags;
   
-  if (sections.count(section) == 0)
+  if (m_sections.count(section) == 0)
   {
     return tags;
   }
   
-  Values& values = sections[section];
-  Values::iterator it = values.begin();
-  for (it=values.begin(); it!=values.end(); ++it)
+  const Values& values = m_sections.at(section);
+  for (Values::const_iterator it = values.begin(); it != values.end(); ++it)
   {
     tags.push_back(it->first);
   }
   
   return tags;
-  
 } /* Config::listSection */
 
 
 void Config::setValue(const std::string& section, const std::string& tag,
                       const std::string& value)
 {
-  Values &values = sections[section];
-  if (value != values[tag].val)
+  // Update in-memory cache
+  Values &values = m_sections[section];
+  bool value_changed = (value != values[tag].val);
+  
+  if (value_changed)
   {
     values[tag].val = value;
+    
+    // Sync to backend
+    syncToBackend(section, tag);
+    
+    // Emit signals and call subscribers
     valueUpdated(section, tag);
     for (const auto& func : values[tag].subs)
     {
@@ -292,255 +325,51 @@ void Config::setValue(const std::string& section, const std::string& tag,
  *
  ****************************************************************************/
 
-
-/*
- *----------------------------------------------------------------------------
- * Method:    
- * Purpose:   
- * Input:     
- * Output:    
- * Author:    
- * Created:   
- * Remarks:   
- * Bugs:      
- *----------------------------------------------------------------------------
- */
-bool Config::parseCfgFile(FILE *file)
+void Config::loadFromBackend(void)
 {
-  char line[16384];
-  int line_no = 0;
-  string current_sec;
-  string current_tag;
-  
-  while (fgets(line, sizeof(line), file) != 0)
+  if (m_backend == nullptr || !m_backend->isOpen())
   {
-    ++line_no;
-    char *l = trimSpaces(line);
-    //printf("%s\n", l);
-    switch (l[0])
+    return;
+  }
+
+  // Load all sections and their tags/values into memory cache
+  list<string> sections = m_backend->listSections();
+  for (const string& section : sections)
+  {
+    list<string> tags = m_backend->listSection(section);
+    for (const string& tag : tags)
     {
-      case 0: 	  // Ignore empty rows and
-      case '#':   // rows starting with a #-character == comments
-      	break;
-      
-      case '[':
+      string value;
+      if (m_backend->getValue(section, tag, value))
       {
-      	char *sec = parseSection(l);
-	if ((sec == 0) || (sec[0] == 0))
-	{
-	  cerr << "*** ERROR: Configuration file parse error. Illegal section "
-	      	  "name syntax on line " << line_no << endl;
-	  return false;
-	}
-	//printf("New section=%s\n", sec);
-	current_sec = sec;
-	current_tag = "";
-	if (sections.count(current_sec) == 0)
-	{
-	  sections[current_sec];	// Create a new empty section
-	  //cerr << "*** ERROR: Configuration file parse error: Section "
-	  //    	  "previously defined on line " << line_no << endl;
-	  //return false;
-	}
-      	break;
-      }
-      
-      case '"':
-      {
-      	char *val = parseValue(l);
-	if (val == 0)
-	{
-	  cerr << "*** ERROR: Configuration file parse error. Illegal value "
-	      	  "syntax on line " << line_no << endl;
-	  return false;
-	}
-	//printf("Continued line=\"%s\"", val);
-	
-	if (current_tag.empty())
-	{
-	  cerr << "*** ERROR: Configuration file parse error. Line "
-	      	  "continuation without previous value on line "
-	       << line_no << endl;
-	  return false;
-	}
-	assert(!current_sec.empty());
-	
-	Values &values = sections[current_sec];
-	string& value = values[current_tag].val;
-	value += val;
-	break;
-      }
-      
-      default:
-      {
-      	string tag, value;
-      	if (!parseValueLine(l, tag, value))
-	{
-	  cerr << "*** ERROR: Configuration file parse error. Illegal value "
-	      	  "line syntax on line " << line_no << endl;
-	  return false;
-	}
-	//printf("tag=\"%s\"  value=\"%s\"\n", tag.c_str(), value.c_str());
-	
-	if (current_sec.empty())
-	{
-	  cerr << "*** ERROR: Configuration file parse error. Value without "
-	      	  "section on line " << line_no << endl;
-	  return false;
-	}
-	Values &values = sections[current_sec];
-	current_tag = tag;
-	values[current_tag].val = value;
-      	break;
+        m_sections[section][tag].val = value;
       }
     }
   }
-  
-  return true;
-  
-} /* Config::parseCfgFile */
+} /* Config::loadFromBackend */
 
-
-char *Config::trimSpaces(char *line)
+void Config::syncToBackend(const std::string& section, const std::string& tag)
 {
-  char *begin = line;
-  while ((*begin != 0) && isspace(*begin))
+  if (m_backend == nullptr || !m_backend->isOpen())
   {
-    ++begin;
+    return;
   }
-  
-  char *end = begin + strlen(begin);
-  while ((end != begin) && (isspace(*end) || (*end == 0)))
+
+  // Get the value from in-memory cache
+  Sections::const_iterator sec_it = m_sections.find(section);
+  if (sec_it != m_sections.end())
   {
-    *end-- = 0;
-  }
-  
-  return begin;
-  
-} /* Config::trimSpaces */
-
-
-char *Config::parseSection(char *line)
-{
-  return parseDelimitedString(line, '[', ']');
-} /* Config::parseSection */
-
-
-char *Config::parseDelimitedString(char *str, char begin_tok, char end_tok)
-{
-  if (str[0] != begin_tok)
-  {
-    return 0;
-  }
-  
-  char *end = str + strlen(str) - 1;
-  if (*end != end_tok)
-  {
-    return 0;
-  }
-  *end = 0;
-  
-  /*
-  if (end == str+1)
-  {
-    return 0;
-  }
-  */
-  
-  return str + 1;
-  
-} /* Config::parseDelimitedString */
-
-
-bool Config::parseValueLine(char *line, string& tag, string& value)
-{
-  char *eq = strchr(line, '=');
-  if (eq == 0)
-  {
-    return false;
-  }
-  *eq = 0;
-  
-  tag = trimSpaces(line);
-  char *val = parseValue(eq + 1);
-  if (val == 0)
-  {
-    return false;
-  }
-  
-  value = val;
-  
-  return true;
-  
-} /* Config::parseValueLine */
-
-
-char *Config::parseValue(char *value)
-{
-  value = trimSpaces(value);
-  if (value[0] == '"')
-  {
-    value = parseDelimitedString(value, '"', '"');
-  }
-  
-  if (value == 0)
-  {
-    return 0;
-  }
-  
-  return translateEscapedChars(value);
-  
-} /* Config::parseValue */
-
-
-char *Config::translateEscapedChars(char *val)
-{
-  char *head = val;
-  char *tail = head;
-  
-  while (*head != 0)
-  {
-    if (*head == '\\')
+    Values::const_iterator val_it = sec_it->second.find(tag);
+    if (val_it != sec_it->second.end())
     {
-      ++head;
-      switch (*head)
+      if (!m_backend->setValue(section, tag, val_it->second.val))
       {
-      	case 'n':
-	  *tail = '\n';
-	  break;
-	  
-      	case 'r':
-	  *tail = '\r';
-	  break;
-	  
-      	case 't':
-	  *tail = '\t';
-	  break;
-	  
-      	case '\\':
-	  *tail = '\\';
-	  break;
-	  
-      	case '"':
-	  *tail = '"';
-	  break;
-	  
-      	default:
-	  return 0;
+        cerr << "*** WARNING: Failed to sync configuration change to backend: "
+             << section << "/" << tag << endl;
       }
     }
-    else
-    {
-      *tail = *head;
-    }
-    ++head;
-    ++tail;
   }
-  *tail = 0;
-  
-  return val;
-  
-} /* Config::translateEscapedChars */
+} /* Config::syncToBackend */
 
 
 /*

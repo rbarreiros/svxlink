@@ -72,6 +72,9 @@ An example of how to use the Config class
  *
  ****************************************************************************/
 
+#include "AsyncConfigBackend.h"
+#include "AsyncConfigManager.h"
+
 
 
 /****************************************************************************
@@ -142,6 +145,16 @@ class Config
      * @brief 	Default constuctor
      */
     Config(void) {}
+
+    /**
+     * @brief 	Copy constructor (deleted - Config is not copyable)
+     */
+    Config(const Config&) = delete;
+
+    /**
+     * @brief 	Assignment operator (deleted - Config is not assignable)
+     */
+    Config& operator=(const Config&) = delete;
   
     /**
      * @brief 	Destructor
@@ -149,15 +162,35 @@ class Config
     ~Config(void);
   
     /**
-     * @brief 	Open the given config file
-     * @param 	name The name of the configuration file to open
+     * @brief 	Open configuration using db.conf for backend selection
+     * @param 	config_dir Optional configuration directory to search for db.conf
      * @return	Returns \em true on success or else \em false.
      *
-     * This function will read the given configuration file into memory.
-     * If this function return false and errno != 0, the errno variable may
-     * give a hint what the problem was.
+     * This function reads db.conf to determine which configuration backend to use.
+     * It searches for db.conf in the following locations:
+     * 1. config_dir/db.conf (if config_dir is provided)
+     * 2. ~/.svxlink/db.conf
+     * 3. /etc/svxlink/db.conf
+     * 4. SVX_SYSCONF_INSTALL_DIR/db.conf
+     * 
+     * If no db.conf is found, defaults to file backend with svxlink.conf.
+     * The application will abort with an error if:
+     * - The specified backend is not available (not compiled in)
+     * - Database connection fails
+     * - Configuration cannot be loaded
      */
-    bool open(const std::string& name);
+    bool open(const std::string& config_dir = "");
+
+    /**
+     * @brief 	Open configuration with explicit source (legacy method)
+     * @param 	source The configuration source (file path, database URL, etc.)
+     * @return	Returns \em true on success or else \em false.
+     *
+     * This is the legacy method that directly opens a configuration source.
+     * For new applications, prefer the parameterless open() method that
+     * uses db.conf for backend selection.
+     */
+    bool openDirect(const std::string& source);
     
     /**
      * @brief 	Return the string value of the given configuration variable
@@ -729,15 +762,11 @@ class Config
       csv_whitespace(std::size_t refs=0) : ctype(make_table(), false, refs) {}
     };
 
-    Sections  sections;
+    ConfigBackendPtr m_backend;
+    Sections         m_sections;  // In-memory cache for subscriptions
 
-    bool parseCfgFile(FILE *file);
-    char *trimSpaces(char *line);
-    char *parseSection(char *line);
-    char *parseDelimitedString(char *str, char begin_tok, char end_tok);
-    bool parseValueLine(char *line, std::string& tag, std::string& value);
-    char *parseValue(char *value);
-    char *translateEscapedChars(char *val);
+    void loadFromBackend(void);
+    void syncToBackend(const std::string& section, const std::string& tag);
 
     template <class T>
     bool setValueFromString(T& val, const std::string &str) const
@@ -755,13 +784,13 @@ class Config
     Value& getValueP(const std::string& section, const std::string& tag,
                      const T& def)
     {
-      Values::iterator val_it = sections[section].find(tag);
-      if (val_it == sections[section].end())
+      Values::iterator val_it = m_sections[section].find(tag);
+      if (val_it == m_sections[section].end())
       {
         setValue(section, tag, def);
       }
 
-      return sections[section][tag];
+      return m_sections[section][tag];
     } /* getValueP */
 
 }; /* class Config */

@@ -32,6 +32,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  ****************************************************************************/
 
+#include <functional>
+
 
 
 /****************************************************************************
@@ -191,7 +193,7 @@ bool Squelch::initialize(Async::Config& cfg, const std::string& rx_name)
   }
 
   cfg.valueUpdated.connect(
-      sigc::bind<0>(sigc::mem_fun(*this, &Squelch::cfgUpdated), cfg));
+      sigc::bind<0>(sigc::mem_fun(*this, &Squelch::cfgUpdated), std::ref(cfg)));
 
   return true;
 } /* Squelch::initialize */
