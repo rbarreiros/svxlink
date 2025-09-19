@@ -285,7 +285,7 @@ int main(int argc, char **argv)
   if (config != NULL)
   {
     cfg_filename = string(config);
-    if (!cfg.open(cfg_filename))
+    if (!cfg.openDirect("file://" + cfg_filename))
     {
       cerr << "*** ERROR: Could not open configuration file: "
       	   << config << endl;
@@ -294,33 +294,13 @@ int main(int argc, char **argv)
   }
   else
   {
-    cfg_filename = string(home_dir);
-    cfg_filename += "/.svxlink/svxlink.conf";
-    if (!cfg.open(cfg_filename))
+    // No specific config file provided - use db.conf based initialization
+    if (!cfg.open())
     {
-      cfg_filename = SVX_SYSCONF_INSTALL_DIR "/svxlink.conf";
-      if (!cfg.open(cfg_filename))
-      {
-	cfg_filename = SYSCONF_INSTALL_DIR "/svxlink.conf";
-	if (!cfg.open(cfg_filename))
-	{
-	  cerr << "*** ERROR: Could not open configuration file";
-          if (errno != 0)
-          {
-            cerr << " (" << strerror(errno) << ")";
-          }
-          cerr << ".\n";
-	  cerr << "Tried the following paths:\n"
-      	       << "\t" << home_dir << "/.svxlink/svxlink.conf\n"
-      	       << "\t" SVX_SYSCONF_INSTALL_DIR "/svxlink.conf\n"
-	       << "\t" SYSCONF_INSTALL_DIR "/svxlink.conf\n"
-	       << "Possible reasons for failure are: None of the files exist,\n"
-	       << "you do not have permission to read the file or there was a\n"
-	       << "syntax error in the file.\n";
-	  exit(1);
-	}
-      }
+      cerr << "*** ERROR: Could not initialize configuration system" << endl;
+      exit(1);
     }
+    cfg_filename = cfg.getMainConfigFile(); // Get the reference file for CFG_DIR resolution
   }
   string main_cfg_filename(cfg_filename);
   
@@ -358,7 +338,7 @@ int main(int argc, char **argv)
       	continue;
       }
       cfg_filename = cfg_dir + "/" + dirent->d_name;
-      if (!cfg.open(cfg_filename))
+      if (!cfg.openDirect("file://" + cfg_filename))
        {
 	 cerr << "*** ERROR: Could not open configuration file: "
 	      << cfg_filename << endl;

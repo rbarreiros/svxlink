@@ -118,7 +118,8 @@ ConfigBackendPtr ConfigManager::initializeBackend(const std::string& config_dir)
   DbConfig db_config;
   
   // Try to find and parse db.conf
-  if (!findAndParseDbConfig(config_dir, db_config))
+  string db_conf_path;
+  if (!findAndParseDbConfig(config_dir, db_config, db_conf_path))
   {
     // If no db.conf found, default to file backend with svxlink.conf
     cout << "No db.conf found, defaulting to file backend" << endl;
@@ -133,6 +134,12 @@ ConfigBackendPtr ConfigManager::initializeBackend(const std::string& config_dir)
     
     db_config.type = "file";
     db_config.source = config_file;
+    m_main_config_reference = config_file; // For file backend, use the config file itself
+  }
+  else
+  {
+    // For database backend, use db.conf location as reference
+    m_main_config_reference = db_conf_path;
   }
   
   // Check if the requested backend type is available
@@ -220,9 +227,9 @@ ConfigBackendPtr ConfigManager::initializeBackend(const std::string& config_dir)
  *
  ****************************************************************************/
 
-bool ConfigManager::findAndParseDbConfig(const std::string& config_dir, DbConfig& config)
+bool ConfigManager::findAndParseDbConfig(const std::string& config_dir, DbConfig& config, std::string& db_conf_path)
 {
-  string db_conf_path = findConfigFile(config_dir, "db.conf");
+  db_conf_path = findConfigFile(config_dir, "db.conf");
   if (db_conf_path.empty())
   {
     return false;

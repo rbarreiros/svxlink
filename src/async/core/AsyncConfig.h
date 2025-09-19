@@ -191,6 +191,16 @@ class Config
      * uses db.conf for backend selection.
      */
     bool openDirect(const std::string& source);
+
+    /**
+     * @brief 	Get the main configuration file path
+     * @return	Returns the path to the main configuration file, or empty if using database backend
+     *
+     * This method returns the path to the main configuration file that was loaded.
+     * For file backend, this is the path to the main .conf file.
+     * For database backends, this returns an empty string since there's no single file.
+     */
+    std::string getMainConfigFile(void) const;
     
     /**
      * @brief 	Return the string value of the given configuration variable
@@ -764,6 +774,7 @@ class Config
 
     ConfigBackendPtr m_backend;
     Sections         m_sections;  // In-memory cache for subscriptions
+    std::string      m_main_config_file; // Path to main config file (for CFG_DIR resolution)
 
     void loadFromBackend(void);
     void syncToBackend(const std::string& section, const std::string& tag);

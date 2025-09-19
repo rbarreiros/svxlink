@@ -340,7 +340,7 @@ int main(int argc, char **argv)
   if (config != NULL)
   {
     cfg_filename = string(config);
-    if (!cfg.open(cfg_filename))
+    if (!cfg.openDirect("file://" + cfg_filename))
     {
       cerr << "*** ERROR: Could not open configuration file: "
       	   << config << endl;
@@ -351,10 +351,10 @@ int main(int argc, char **argv)
   {
     cfg_filename = string(home_dir);
     cfg_filename += "/.svxlink/remotetrx.conf";
-    if (!cfg.open(cfg_filename))
+    if (!cfg.openDirect("file://" + cfg_filename))
     {
       cfg_filename = SVX_SYSCONF_INSTALL_DIR "/remotetrx.conf";
-      if (!cfg.open(cfg_filename))
+      if (!cfg.openDirect("file://" + cfg_filename))
       {
 	cfg_filename = SYSCONF_INSTALL_DIR "/remotetrx.conf";
 	if (!cfg.open(cfg_filename))
@@ -413,7 +413,7 @@ int main(int argc, char **argv)
       	continue;
       }
       cfg_filename = cfg_dir + "/" + dirent->d_name;
-      if (!cfg.open(cfg_filename))
+      if (!cfg.openDirect("file://" + cfg_filename))
        {
 	 cerr << "*** ERROR: Could not open configuration file: "
 	      << cfg_filename << endl;

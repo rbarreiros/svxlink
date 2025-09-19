@@ -284,7 +284,7 @@ int main(int argc, const char *argv[])
   if (config != NULL)
   {
     cfg_filename = string(config);
-    if (!cfg.open(cfg_filename))
+    if (!cfg.openDirect("file://" + cfg_filename))
     {
       cerr << "*** ERROR: Could not open configuration file: "
            << config << endl;
@@ -295,10 +295,10 @@ int main(int argc, const char *argv[])
   {
     cfg_filename = string(home_dir);
     cfg_filename += "/.svxlink/svxreflector.conf";
-    if (!cfg.open(cfg_filename))
+    if (!cfg.openDirect("file://" + cfg_filename))
     {
       cfg_filename = SVX_SYSCONF_INSTALL_DIR "/svxreflector.conf";
-      if (!cfg.open(cfg_filename))
+      if (!cfg.openDirect("file://" + cfg_filename))
       {
         cerr << "*** ERROR: Could not open configuration file";
         if (errno != 0)
@@ -351,7 +351,7 @@ int main(int argc, const char *argv[])
         continue;
       }
       cfg_filename = cfg_dir + "/" + dirent->d_name;
-      if (!cfg.open(cfg_filename))
+      if (!cfg.openDirect("file://" + cfg_filename))
        {
 	 cerr << "*** ERROR: Could not open configuration file: "
 	      << cfg_filename << endl;

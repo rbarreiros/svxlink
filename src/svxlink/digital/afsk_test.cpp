@@ -439,7 +439,7 @@ int main(int argc, const char **argv)
   string cfg_filename(getenv("HOME"));
   cfg_filename += "/.svxlink/svxlink.conf";
   Async::Config cfg;
-  if (!cfg.open(cfg_filename))
+  if (!cfg.openDirect("file://" + cfg_filename))
   {
     cout << "*** ERROR: Could not open configuration file: "
          << cfg_filename << endl;

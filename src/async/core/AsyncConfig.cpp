@@ -133,7 +133,7 @@ Config::~Config(void)
 bool Config::open(const string& config_dir)
 {
   ConfigManager manager;
-  
+
   // Initialize backend using db.conf
   m_backend = manager.initializeBackend(config_dir);
   if (m_backend == nullptr)
@@ -142,6 +142,11 @@ bool Config::open(const string& config_dir)
     cerr << "*** APPLICATION ABORTING: Cannot initialize configuration backend" << endl;
     exit(1);  // Abort application as requested
   }
+
+  // For CFG_DIR resolution, we need a reference point:
+  // - For file backend: use the main config file path
+  // - For database backend: use the db.conf location
+  m_main_config_file = manager.getMainConfigReference();
 
   // Load all configuration data into memory for subscription support
   loadFromBackend();
@@ -159,6 +164,16 @@ bool Config::openDirect(const string& source)
     return false;
   }
 
+  // Store the main config file path for CFG_DIR resolution
+  if (source.find("file://") == 0)
+  {
+    m_main_config_file = source.substr(7); // Remove "file://" prefix
+  }
+  else
+  {
+    m_main_config_file = ""; // Database backend - no single file
+  }
+
   cout << "Using " << m_backend->getBackendType() << " configuration backend: " 
        << m_backend->getBackendInfo() << endl;
 
@@ -167,6 +182,12 @@ bool Config::openDirect(const string& source)
 
   return true;
 } /* Config::openDirect */
+
+
+std::string Config::getMainConfigFile(void) const
+{
+  return m_main_config_file;
+} /* Config::getMainConfigFile */
 
 
 bool Config::getValue(const std::string& section, const std::string& tag,

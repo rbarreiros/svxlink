@@ -147,10 +147,20 @@ class ConfigManager
      */
     const std::string& getLastError(void) const { return m_last_error; }
 
+    /**
+     * @brief Get the main configuration reference path for CFG_DIR resolution
+     * @return Path to use as reference for relative CFG_DIR paths
+     *
+     * For file backend: returns the main config file path
+     * For database backend: returns the db.conf file path
+     */
+    const std::string& getMainConfigReference(void) const { return m_main_config_reference; }
+
   protected:
 
   private:
     std::string m_last_error;
+    std::string m_main_config_reference;
 
     struct DbConfig
     {
@@ -158,7 +168,7 @@ class ConfigManager
       std::string source;
     };
 
-    bool findAndParseDbConfig(const std::string& config_dir, DbConfig& config);
+    bool findAndParseDbConfig(const std::string& config_dir, DbConfig& config, std::string& db_conf_path);
     bool parseDbConfigFile(const std::string& file_path, DbConfig& config);
     bool initializeDatabase(ConfigBackend* backend);
     void populateDefaultConfiguration(ConfigBackend* backend);
