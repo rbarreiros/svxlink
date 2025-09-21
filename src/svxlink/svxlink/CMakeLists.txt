@@ -1,7 +1,7 @@
 # C++ source files needed to build SvxLink
 set(SVXLINK_SRCS
   svxlink.cpp MsgHandler.cpp Module.cpp Logic.cpp EventHandler.cpp
-  LinkManager.cpp CmdParser.cpp QsoRecorder.cpp DtmfDigitHandler.cpp
+  LinkManager.cpp CmdParser.cpp QsoRecorder.cpp DtmfDigitHandler.cpp TOTPAuth.cpp
   )
 
 # TCL event handler files to install in the events.d subdirectory
@@ -75,12 +75,32 @@ pkg_check_modules (JSONCPP REQUIRED jsoncpp)
 include_directories(${JSONCPP_INCLUDE_DIRS})
 set(LIBS ${LIBS} ${JSONCPP_LIBRARIES})
 
+# Find OpenSSL for TOTP authentication
+find_package(OpenSSL REQUIRED)
+set(LIBS ${LIBS} ${OPENSSL_LIBRARIES})
+include_directories(${OPENSSL_INCLUDE_DIR})
+
 # Add project libraries
 set(LIBS trx locationinfo asynccpp asyncaudio asynccore svxmisc ${LIBS})
 
 # Build the executable
 add_executable(svxlink ${SVXLINK_SRCS} ${VERSION_DEPENDS})
 target_link_libraries(svxlink ${LIBS})
+
+# Build TOTP configuration tool
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(QRENCODE libqrencode)
+if(QRENCODE_FOUND)
+  add_executable(svxlink_totp_config svxlink_totp_config.cpp TOTPAuth.cpp)
+  target_link_libraries(svxlink_totp_config ${OPENSSL_LIBRARIES} ${QRENCODE_LIBRARIES})
+  target_include_directories(svxlink_totp_config PRIVATE ${OPENSSL_INCLUDE_DIR} ${QRENCODE_INCLUDE_DIRS})
+  set_target_properties(svxlink_totp_config PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${RUNTIME_OUTPUT_DIRECTORY}
+  )
+else()
+  message(WARNING "libqrencode not found - TOTP configuration tool will not be built")
+endif()
+
 set_target_properties(svxlink PROPERTIES
   ENABLE_EXPORTS on
   RUNTIME_OUTPUT_DIRECTORY ${RUNTIME_OUTPUT_DIRECTORY}
@@ -112,6 +132,9 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/svxlink_gpio_down.in
 
 # Install targets
 install(TARGETS svxlink DESTINATION ${BIN_INSTALL_DIR})
+if(QRENCODE_FOUND)
+  install(TARGETS svxlink_totp_config DESTINATION ${BIN_INSTALL_DIR})
+endif()
 install_mkdir(${SVX_SPOOL_INSTALL_DIR}/qso_recorder ${SVXLINK_USER}:${SVXLINK_GROUP})
 install_mkdir(${SVX_SHARE_INSTALL_DIR}/sounds)
 install_mkdir(${SVX_LOCAL_STATE_DIR}/pki ${SVXLINK_USER}:${SVXLINK_GROUP})
