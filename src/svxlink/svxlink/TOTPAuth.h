@@ -342,6 +342,12 @@ class TOTPValidator
     std::vector<std::string> getUserList(void) const;
 
   private:
+    enum AuthState
+    {
+      NotAuthenticated,
+      AwaitingCommand
+    };
+
     std::map<std::string, UserInfo> m_users;
     bool m_enabled;
     bool m_authenticated;
@@ -354,6 +360,12 @@ class TOTPValidator
     int m_tolerance_windows;
     std::string m_authenticated_user;
 
+    AuthState m_auth_state;
+
+    /**
+     * @brief   Consume the one-time authentication
+     */
+    void consumeAuthentication(void);
     /**
      * @brief   Process completed TOTP code
      */
@@ -370,6 +382,9 @@ class TOTPValidator
      */
     bool hasAuthenticationExpired(void) const;
 
+    // Friend class for Logic to call consumeAuthentication
+    friend class Logic;
+
     // Prevent copying
     TOTPValidator(const TOTPValidator&);
     TOTPValidator& operator=(const TOTPValidator&);
@@ -380,4 +395,3 @@ class TOTPValidator
 /*
  * This file has not been truncated
  */
-

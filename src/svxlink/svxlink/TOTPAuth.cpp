@@ -154,7 +154,7 @@ std::string TOTPAuth::generateSecret(void)
 
 bool TOTPAuth::validateCode(const std::string& code, int window_tolerance)
 {
-  if (!m_configured || code.length() != TOTP_DIGITS)
+  if (!m_configured || code.length() != static_cast<size_t>(TOTP_DIGITS))
   {
     return false;
   }
@@ -188,7 +188,7 @@ bool TOTPAuth::validateCode(const std::string& code, int window_tolerance)
 
 bool TOTPAuth::validateCodeOnce(const std::string& code, int window_tolerance)
 {
-  if (!m_configured || code.length() != TOTP_DIGITS)
+  if (!m_configured || code.length() != static_cast<size_t>(TOTP_DIGITS))
   {
     return false;
   }
@@ -301,8 +301,8 @@ std::vector<uint8_t> TOTPAuth::base32Decode(const std::string& base32_str)
   // Convert to uppercase
   transform(input.begin(), input.end(), input.begin(), ::toupper);
 
-  size_t bits = 0;
-  int value = 0;
+  uint32_t bits = 0;
+  uint32_t value = 0;
 
   for (char c : input)
   {
@@ -335,8 +335,8 @@ std::string TOTPAuth::base32Encode(const std::vector<uint8_t>& data)
     return result;
   }
 
-  int bits = 0;
-  int value = 0;
+  uint32_t bits = 0;
+  uint32_t value = 0;
 
   for (uint8_t byte : data)
   {
@@ -370,8 +370,8 @@ std::vector<uint8_t> TOTPAuth::hmacSha1(const std::vector<uint8_t>& key,
   vector<uint8_t> result(SHA_DIGEST_LENGTH);
   unsigned int len = 0;
 
-  HMAC(EVP_sha1(), key.data(), key.size(), data.data(), data.size(),
-       result.data(), &len);
+  HMAC(EVP_sha1(), key.data(), static_cast<int>(key.size()), data.data(),
+       static_cast<int>(data.size()), result.data(), &len);
 
   result.resize(len);
   return result;
@@ -414,7 +414,7 @@ std::vector<uint8_t> TOTPAuth::generateRandomBytes(size_t length)
 {
   vector<uint8_t> result(length);
   
-  if (RAND_bytes(result.data(), length) != 1)
+  if (RAND_bytes(result.data(), static_cast<int>(length)) != 1)
   {
     // Fallback to C++ random if OpenSSL fails
     random_device rd;
@@ -468,7 +468,7 @@ void TOTPAuth::cleanupOldCounters(void)
 
 TOTPValidator::TOTPValidator(void)
   : m_enabled(false), m_authenticated(false), m_collecting_totp(false),
-    m_auth_timestamp(0), m_auth_timeout(300), m_time_window(30), 
+    m_auth_timestamp(0), m_auth_timeout(300), m_time_window(30),
     m_totp_length(6), m_tolerance_windows(1)
 {
 } /* TOTPValidator::TOTPValidator */
@@ -476,6 +476,7 @@ TOTPValidator::TOTPValidator(void)
 TOTPValidator::~TOTPValidator(void)
 {
   clearBuffer();
+  m_auth_state = NotAuthenticated;
 } /* TOTPValidator::~TOTPValidator */
 
 bool TOTPValidator::initialize(int time_window, int totp_length, 
@@ -547,7 +548,7 @@ bool TOTPValidator::processDtmfDigit(char digit)
   }
 
   // If already authenticated, don't consume digits
-  if (m_authenticated)
+  if (m_auth_state == AwaitingCommand)
   {
     return false;
   }
@@ -555,8 +556,8 @@ bool TOTPValidator::processDtmfDigit(char digit)
   // Start collecting TOTP if we receive a digit
   if (!m_collecting_totp)
   {
-    m_collecting_totp = true;
     clearBuffer();
+    m_collecting_totp = true;
   }
 
   // Only accept numeric digits for TOTP
@@ -565,7 +566,7 @@ bool TOTPValidator::processDtmfDigit(char digit)
     m_totp_buffer += digit;
     
     // Check if we have a complete TOTP code
-    if (m_totp_buffer.length() >= m_totp_length)
+    if (m_totp_buffer.length() >= static_cast<size_t>(m_totp_length))
     {
       processCompletedCode();
       return true; // Still consumed the digit
@@ -599,7 +600,7 @@ bool TOTPValidator::isAuthenticated(void) const
     return true; // If TOTP is disabled, consider always authenticated
   }
 
-  return m_authenticated && !hasAuthenticationExpired();
+  return m_auth_state == AwaitingCommand && !hasAuthenticationExpired();
 } /* TOTPValidator::isAuthenticated */
 
 bool TOTPValidator::isEnabled(void) const
@@ -609,6 +610,7 @@ bool TOTPValidator::isEnabled(void) const
 
 void TOTPValidator::resetAuthentication(void)
 {
+  m_auth_state = NotAuthenticated;
   m_authenticated = false;
   m_auth_timestamp = 0;
   m_authenticated_user.clear();
@@ -631,6 +633,12 @@ std::vector<std::string> TOTPValidator::getUserList(void) const
  *
  ****************************************************************************/
 
+void TOTPValidator::consumeAuthentication(void)
+{
+  cout << "TOTP one-time authentication consumed." << endl;
+  resetAuthentication();
+}
+
 void TOTPValidator::processCompletedCode(void)
 {
   if (m_totp_buffer.empty())
@@ -640,7 +648,7 @@ void TOTPValidator::processCompletedCode(void)
   }
 
   // Pad with zeros if needed (for shorter codes)
-  while (m_totp_buffer.length() < m_totp_length)
+  while (m_totp_buffer.length() < static_cast<size_t>(m_totp_length))
   {
     m_totp_buffer = "0" + m_totp_buffer;
   }
@@ -655,7 +663,7 @@ void TOTPValidator::processCompletedCode(void)
     
     if (valid)
     {
-      m_authenticated = true;
+      m_auth_state = AwaitingCommand;
       m_auth_timestamp = time(nullptr);
       m_authenticated_user = user_id;
       cout << "TOTP authentication successful for user: " << user_info.name 
@@ -677,7 +685,7 @@ void TOTPValidator::clearBuffer(void)
 
 bool TOTPValidator::hasAuthenticationExpired(void) const
 {
-  if (!m_authenticated)
+  if (m_auth_state != AwaitingCommand)
   {
     return true;
   }
