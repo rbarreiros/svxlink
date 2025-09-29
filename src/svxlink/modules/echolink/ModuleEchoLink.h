@@ -213,6 +213,7 @@ class ModuleEchoLink : public Module
     EchoLink::Proxy       *proxy;
     Async::Pty            *pty;
     std::string           command_buf;
+    bool                  mute_tx_on_rx;
 
     void moduleCleanup(void);
     void activateInit(void);

@@ -71,6 +71,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "version/MODULE_ECHO_LINK.h"
 #include "ModuleEchoLink.h"
 #include "QsoImpl.h"
+#include "Logic.h"
+#include "Rx.h"
 
 
 /****************************************************************************
@@ -169,7 +171,7 @@ ModuleEchoLink::ModuleEchoLink(void *dl_handle, Logic *logic,
     listen_only_valve(0), selector(0), num_con_max(0), num_con_ttl(5*60),
     num_con_block_time(120*60), num_con_update_timer(0), reject_conf(false),
     autocon_echolink_id(0), autocon_time(DEFAULT_AUTOCON_TIME),
-    autocon_timer(0), proxy(0), pty(0)
+    autocon_timer(0), proxy(0), pty(0), mute_tx_on_rx(false)
 {
   cout << "\tModule EchoLink v" MODULE_ECHO_LINK_VERSION " starting...\n";
   
@@ -414,6 +416,14 @@ bool ModuleEchoLink::initialize(void)
 
   cfg().valueUpdated.connect(
       sigc::mem_fun(*this, &ModuleEchoLink::cfgValueUpdated));
+
+  
+  // Mute the logic holding the ModuleEcholink TX 
+  // when the echolink module is transmitting audio.
+  if (cfg().getValue(cfgName(), "MUTE_TX_ON_RX", mute_tx_on_rx))
+  {
+    mute_tx_on_rx = atoi(mute_tx_on_rx.c_str()) != 0;
+  }
 
   return true;
   
@@ -1294,6 +1304,17 @@ void ModuleEchoLink::onIsReceiving(bool is_receiving, QsoImpl *qso)
       broadcastTalkerStatus();
     }
   }
+
+  // Mute Logic TX when the echolink module is transmitting audio.
+  if(mute_tx_on_rx && is_receiving)
+  {
+    logic()->tx().setMuteState(Tx::MUTE_CONTENT);
+  }
+  else
+  {
+    logic()->tx().setMuteState(Tx::MUTE_NONE);
+  }
+
 } /* onIsReceiving */
 
 
