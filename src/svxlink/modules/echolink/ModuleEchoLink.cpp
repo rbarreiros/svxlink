@@ -420,10 +420,7 @@ bool ModuleEchoLink::initialize(void)
   
   // Mute the logic holding the ModuleEcholink TX 
   // when the echolink module is transmitting audio.
-  if (cfg().getValue(cfgName(), "MUTE_TX_ON_RX", mute_tx_on_rx))
-  {
-    mute_tx_on_rx = atoi(mute_tx_on_rx.c_str()) != 0;
-  }
+  cfg().getValue(cfgName(), "MUTE_TX_ON_RX", mute_tx_on_rx);
 
   return true;
   
@@ -1308,11 +1305,11 @@ void ModuleEchoLink::onIsReceiving(bool is_receiving, QsoImpl *qso)
   // Mute Logic TX when the echolink module is transmitting audio.
   if(mute_tx_on_rx && is_receiving)
   {
-    logic()->tx().setMuteState(Tx::MUTE_CONTENT);
+    logic()->rx().setMuteState(Rx::MUTE_CONTENT);
   }
   else
   {
-    logic()->tx().setMuteState(Tx::MUTE_NONE);
+    logic()->rx().setMuteState(Rx::MUTE_NONE);
   }
 
 } /* onIsReceiving */
