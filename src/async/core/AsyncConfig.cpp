@@ -154,6 +154,28 @@ bool Config::open(const string& config_dir)
   return true;
 } /* Config::open */
 
+bool Config::openFromDbConfig(const string& db_conf_path)
+{
+  ConfigManager manager;
+
+  // Initialize backend using specific db.conf file
+  m_backend = manager.initializeBackendFromFile(db_conf_path);
+  if (m_backend == nullptr)
+  {
+    cerr << "*** FATAL ERROR: " << manager.getLastError() << endl;
+    cerr << "*** APPLICATION ABORTING: Cannot initialize configuration backend from " << db_conf_path << endl;
+    exit(1);  // Abort application as requested
+  }
+
+  // For CFG_DIR resolution, use the db.conf location as reference
+  m_main_config_file = manager.getMainConfigReference();
+
+  // Load all configuration data into memory for subscription support
+  loadFromBackend();
+
+  return true;
+} /* Config::openFromDbConfig */
+
 bool Config::openDirect(const string& source)
 {
   // Create the appropriate backend using the factory (legacy method)
@@ -188,6 +210,15 @@ std::string Config::getMainConfigFile(void) const
 {
   return m_main_config_file;
 } /* Config::getMainConfigFile */
+
+std::string Config::getBackendType(void) const
+{
+  if (m_backend != nullptr)
+  {
+    return m_backend->getBackendType();
+  }
+  return "";
+} /* Config::getBackendType */
 
 
 bool Config::getValue(const std::string& section, const std::string& tag,

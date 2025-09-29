@@ -136,6 +136,7 @@ namespace {
   char*                 logfile_name = nullptr;
   char*                 runasuser = nullptr;
   char*                 config = nullptr;
+  char*                 dbconfig = nullptr;
   int                   daemonize = 0;
   int                   reset = 0;
   int                   quiet = 0;
@@ -282,76 +283,113 @@ int main(int argc, char **argv)
   
   Config cfg;
   string cfg_filename;
+  
+  // Configuration backend selection logic according to requirements:
+  // 1. If --config is specified, use file backend with that file
+  // 2. If --dbconfig is specified, use database backend with that db config file
+  // 3. If no arguments, search for db.conf in usual places, if found use database backend
+  // 4. If no db.conf found, fall back to file backend with svxlink.conf in usual places
+  // 5. If neither found, complain and exit
+  
   if (config != NULL)
   {
+    // Case 1: --config specified, use file backend
     cfg_filename = string(config);
+    cout << "Using file backend with config file: " << cfg_filename << endl;
     if (!cfg.openDirect("file://" + cfg_filename))
     {
-      cerr << "*** ERROR: Could not open configuration file: "
-      	   << config << endl;
+      cerr << "*** ERROR: Could not open configuration file: " << config << endl;
       exit(1);
     }
   }
-  else
+  else if (dbconfig != NULL)
   {
-    // No specific config file provided - use db.conf based initialization
-    if (!cfg.open())
+    // Case 2: --dbconfig specified, use database backend with that db config file
+    string db_config_path = string(dbconfig);
+    cout << "Using database backend with db config file: " << db_config_path << endl;
+    
+    if (!cfg.openFromDbConfig(db_config_path))
     {
-      cerr << "*** ERROR: Could not initialize configuration system" << endl;
+      cerr << "*** ERROR: Could not initialize database configuration system with: " 
+           << db_config_path << endl;
       exit(1);
     }
     cfg_filename = cfg.getMainConfigFile(); // Get the reference file for CFG_DIR resolution
   }
+  else
+  {
+    // Case 3 & 4: No arguments specified, search for db.conf first, then svxlink.conf
+    cout << "No configuration arguments specified, searching in standard locations..." << endl;
+    if (!cfg.open())
+    {
+      cerr << "*** ERROR: Could not initialize configuration system" << endl;
+      cerr << "*** Please ensure either db.conf or svxlink.conf exists in standard locations:" << endl;
+      cerr << "***   ~/.svxlink/" << endl;
+      cerr << "***   /etc/svxlink/" << endl;
+      exit(1);
+    }
+    cfg_filename = cfg.getMainConfigFile(); // Get the reference file for CFG_DIR resolution
+  }
+  
   string main_cfg_filename(cfg_filename);
   
-  string cfg_dir;
-  if (cfg.getValue("GLOBAL", "CFG_DIR", cfg_dir))
+  // CFG_DIR processing: Only applies to file backend
+  // Database backend loads ALL configuration from database and ignores files
+  if (cfg.getBackendType() == "file")
   {
-    if (cfg_dir[0] != '/')
+    string cfg_dir;
+    if (cfg.getValue("GLOBAL", "CFG_DIR", cfg_dir))
     {
-      int slash_pos = main_cfg_filename.rfind('/');
-      if (slash_pos != -1)
+      if (cfg_dir[0] != '/')
       {
-      	cfg_dir = main_cfg_filename.substr(0, slash_pos+1) + cfg_dir;
+        int slash_pos = main_cfg_filename.rfind('/');
+        if (slash_pos != -1)
+        {
+        	cfg_dir = main_cfg_filename.substr(0, slash_pos+1) + cfg_dir;
+        }
+        else
+        {
+        	cfg_dir = string("./") + cfg_dir;
+        }
       }
-      else
+      
+      DIR *dir = opendir(cfg_dir.c_str());
+      if (dir == NULL)
       {
-      	cfg_dir = string("./") + cfg_dir;
+        cerr << "*** ERROR: Could not read from directory specified by "
+        	   << "configuration variable GLOBAL/CFG_DIR=" << cfg_dir << endl;
+        exit(1);
       }
-    }
-    
-    DIR *dir = opendir(cfg_dir.c_str());
-    if (dir == NULL)
-    {
-      cerr << "*** ERROR: Could not read from directory spcified by "
-      	   << "configuration variable GLOBAL/CFG_DIR=" << cfg_dir << endl;
-      exit(1);
-    }
-    
-    struct dirent *dirent;
-    while ((dirent = readdir(dir)) != NULL)
-    {
-      char *dot = strrchr(dirent->d_name, '.');
-      if ((dot == NULL) || (dirent->d_name[0] == '.') ||
-          (strcmp(dot, ".conf") != 0))
+      
+      struct dirent *dirent;
+      while ((dirent = readdir(dir)) != NULL)
       {
-      	continue;
+        char *dot = strrchr(dirent->d_name, '.');
+        if ((dot == NULL) || (dirent->d_name[0] == '.') ||
+            (strcmp(dot, ".conf") != 0))
+        {
+        	continue;
+        }
+        cfg_filename = cfg_dir + "/" + dirent->d_name;
+        if (!cfg.openDirect("file://" + cfg_filename))
+         {
+	   cerr << "*** ERROR: Could not open configuration file: "
+	        << cfg_filename << endl;
+	   exit(1);
+         }
       }
-      cfg_filename = cfg_dir + "/" + dirent->d_name;
-      if (!cfg.openDirect("file://" + cfg_filename))
-       {
-	 cerr << "*** ERROR: Could not open configuration file: "
-	      << cfg_filename << endl;
-	 exit(1);
-       }
+      
+      if (closedir(dir) == -1)
+      {
+        cerr << "*** ERROR: Error closing directory specified by "
+        	   << "configuration variable GLOBAL/CFG_DIR=" << cfg_dir << endl;
+        exit(1);
+      }
     }
-    
-    if (closedir(dir) == -1)
-    {
-      cerr << "*** ERROR: Error closing directory specified by"
-      	   << "configuration variable GLOBAL/CFG_DIR=" << cfg_dir << endl;
-      exit(1);
-    }
+  }
+  else
+  {
+    cout << "Using " << cfg.getBackendType() << " backend - CFG_DIR processing skipped (all config loaded from database)" << endl;
   }
 
   std::string tstamp_format = "%c";
@@ -517,6 +555,8 @@ static void parse_arguments(int argc, const char **argv)
 	    "Specify the user to run SvxLink as", "<username>"},
     {"config", 0, POPT_ARG_STRING, &config, 0,
 	    "Specify the configuration file to use", "<filename>"},
+    {"dbconfig", 0, POPT_ARG_STRING, &dbconfig, 0,
+	    "Specify the database configuration file to use", "<filename>"},
     /*
     {"int_arg", 'i', POPT_ARG_INT, &int_arg, 0,
 	    "Description of int argument", "<an int>"},

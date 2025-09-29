@@ -182,6 +182,16 @@ class Config
     bool open(const std::string& config_dir = "");
 
     /**
+     * @brief 	Open configuration using specific db.conf file
+     * @param 	db_conf_path The full path to the db.conf file to use
+     * @return	Returns \em true on success or else \em false.
+     *
+     * This function directly uses the specified db.conf file for backend
+     * selection instead of searching in standard locations.
+     */
+    bool openFromDbConfig(const std::string& db_conf_path);
+
+    /**
      * @brief 	Open configuration with explicit source (legacy method)
      * @param 	source The configuration source (file path, database URL, etc.)
      * @return	Returns \em true on success or else \em false.
@@ -201,6 +211,14 @@ class Config
      * For database backends, this returns an empty string since there's no single file.
      */
     std::string getMainConfigFile(void) const;
+
+    /**
+     * @brief   Get the configuration backend type
+     * @return  Returns the backend type string ("file", "sqlite", "mysql", "postgresql")
+     *
+     * This method returns the type of configuration backend currently in use.
+     */
+    std::string getBackendType(void) const;
     
     /**
      * @brief 	Return the string value of the given configuration variable

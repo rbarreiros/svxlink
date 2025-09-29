@@ -38,6 +38,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <unistd.h>
 #include <sys/stat.h>
 #include <vector>
+#include <dirent.h>
+#include <cstring>
 
 /****************************************************************************
  *
@@ -138,8 +140,15 @@ ConfigBackendPtr ConfigManager::initializeBackend(const std::string& config_dir)
   }
   else
   {
-    // For database backend, use db.conf location as reference
-    m_main_config_reference = db_conf_path;
+    // For CFG_DIR resolution, use the actual config source file if it's a file backend
+    if (db_config.type == "file")
+    {
+      m_main_config_reference = db_config.source; // Use the actual config file
+    }
+    else
+    {
+      m_main_config_reference = db_conf_path; // Use db.conf location for database backends
+    }
   }
   
   // Check if the requested backend type is available
@@ -214,6 +223,103 @@ ConfigBackendPtr ConfigManager::initializeBackend(const std::string& config_dir)
   
   return backend;
 } /* ConfigManager::initializeBackend */
+
+ConfigBackendPtr ConfigManager::initializeBackendFromFile(const std::string& db_conf_path)
+{
+  m_last_error.clear();
+  
+  DbConfig db_config;
+  
+  // Parse the specified db.conf file directly
+  if (!parseDbConfigFile(db_conf_path, db_config))
+  {
+    m_last_error = "Could not parse database configuration file: " + db_conf_path;
+    cerr << "*** ERROR: " << m_last_error << endl;
+    return nullptr;
+  }
+  
+  // For CFG_DIR resolution, use the actual config source file if it's a file backend
+  if (db_config.type == "file")
+  {
+    m_main_config_reference = db_config.source; // Use the actual config file
+  }
+  else
+  {
+    m_main_config_reference = db_conf_path; // Use db.conf location for database backends
+  }
+  
+  // Check if the requested backend type is available
+  ConfigFactory::BackendType backend_type = ConfigFactory::BACKEND_UNKNOWN;
+  if (db_config.type == "file")
+  {
+    backend_type = ConfigFactory::BACKEND_FILE;
+  }
+  else if (db_config.type == "sqlite")
+  {
+    backend_type = ConfigFactory::BACKEND_SQLITE;
+  }
+  else if (db_config.type == "mysql")
+  {
+    backend_type = ConfigFactory::BACKEND_MYSQL;
+  }
+  else if (db_config.type == "postgresql")
+  {
+    backend_type = ConfigFactory::BACKEND_POSTGRESQL;
+  }
+  else
+  {
+    m_last_error = "Unknown backend type: " + db_config.type;
+    cerr << "*** ERROR: " << m_last_error << endl;
+    return nullptr;
+  }
+  
+  if (!ConfigFactory::isBackendAvailable(backend_type))
+  {
+    m_last_error = "Backend '" + db_config.type + "' is not available (not compiled in)";
+    cerr << "*** ERROR: " << m_last_error << endl;
+    cerr << "Available backends: " << ConfigFactory::getAvailableBackends() << endl;
+    return nullptr;
+  }
+  
+  // Create the backend
+  string source_url;
+  if (db_config.type == "file")
+  {
+    source_url = db_config.source;
+  }
+  else if (db_config.type == "sqlite")
+  {
+    source_url = "sqlite://" + db_config.source;
+  }
+  else
+  {
+    source_url = db_config.source; // Already includes protocol for mysql/postgresql
+  }
+  
+  ConfigBackendPtr backend = ConfigFactory::createBackend(source_url);
+  if (backend == nullptr)
+  {
+    m_last_error = "Failed to create " + db_config.type + " backend";
+    cerr << "*** ERROR: " << m_last_error << endl;
+    return nullptr;
+  }
+  
+  cout << "Successfully initialized " << backend->getBackendType() 
+       << " configuration backend: " << backend->getBackendInfo() << endl;
+  
+  // For database backends, check if initialization is needed
+  if (backend->getBackendType() != "file")
+  {
+    if (!initializeDatabase(backend.get()))
+    {
+      m_last_error = "Failed to initialize database backend";
+      cerr << "*** ERROR: " << m_last_error << endl;
+      return nullptr;
+    }
+  }
+  
+  return backend;
+} /* ConfigManager::initializeBackendFromFile */
 
 /****************************************************************************
  *
@@ -332,22 +438,146 @@ bool ConfigManager::initializeDatabase(ConfigBackend* backend)
     return true;
   }
   
-  cout << "Database is empty, initializing with default configuration..." << endl;
+  cout << "Database is empty, initializing..." << endl;
   
-  // Populate with default configuration
-  populateDefaultConfiguration(backend);
+  // Try to populate from existing file configuration first
+  if (populateFromExistingFiles(backend))
+  {
+    cout << "Database initialized from existing configuration files" << endl;
+  }
+  else
+  {
+    cout << "No existing configuration files found, using default configuration..." << endl;
+    populateDefaultConfiguration(backend);
+  }
   
   // Verify initialization
   sections = backend->listSections();
   if (sections.empty())
   {
-    cerr << "*** ERROR: Failed to initialize database with default configuration" << endl;
+    cerr << "*** ERROR: Failed to initialize database" << endl;
     return false;
   }
   
   cout << "Database initialized successfully with " << sections.size() << " sections" << endl;
   return true;
 } /* ConfigManager::initializeDatabase */
+
+bool ConfigManager::populateFromExistingFiles(ConfigBackend* backend)
+{
+  if (backend == nullptr)
+  {
+    return false;
+  }
+  
+  // Look for existing svxlink.conf in standard locations
+  string config_file = findConfigFile("", "svxlink.conf");
+  if (config_file.empty())
+  {
+    return false; // No existing configuration files found
+  }
+  
+  cout << "Found existing configuration file: " << config_file << endl;
+  cout << "Loading existing configuration to populate database..." << endl;
+  
+  // Create a temporary file backend to read the existing configuration
+  ConfigBackendPtr file_backend = ConfigFactory::createBackend("file://" + config_file);
+  if (file_backend == nullptr)
+  {
+    cerr << "*** WARNING: Could not create file backend for " << config_file << endl;
+    return false;
+  }
+  
+  // Copy all sections and values from file backend to database backend
+  list<string> sections = file_backend->listSections();
+  for (const string& section : sections)
+  {
+    list<string> tags = file_backend->listSection(section);
+    for (const string& tag : tags)
+    {
+      string value;
+      if (file_backend->getValue(section, tag, value))
+      {
+        if (!backend->setValue(section, tag, value))
+        {
+          cerr << "*** WARNING: Failed to set " << section << "/" << tag << " in database" << endl;
+        }
+      }
+    }
+  }
+  
+  // Process CFG_DIR if specified in the main config file
+  string cfg_dir;
+  if (file_backend->getValue("GLOBAL", "CFG_DIR", cfg_dir))
+  {
+    // Make CFG_DIR path absolute if it's relative
+    if (cfg_dir[0] != '/')
+    {
+      int slash_pos = config_file.rfind('/');
+      if (slash_pos != -1)
+      {
+        cfg_dir = config_file.substr(0, slash_pos+1) + cfg_dir;
+      }
+      else
+      {
+        cfg_dir = string("./") + cfg_dir;
+      }
+    }
+    
+    cout << "Processing CFG_DIR: " << cfg_dir << endl;
+    
+    DIR *dir = opendir(cfg_dir.c_str());
+    if (dir != NULL)
+    {
+      struct dirent *dirent;
+      while ((dirent = readdir(dir)) != NULL)
+      {
+        char *dot = strrchr(dirent->d_name, '.');
+        if ((dot == NULL) || (dirent->d_name[0] == '.') ||
+            (strcmp(dot, ".conf") != 0))
+        {
+          continue;
+        }
+        
+        string cfg_file_path = cfg_dir + "/" + dirent->d_name;
+        cout << "Loading additional config file: " << cfg_file_path << endl;
+        
+        ConfigBackendPtr additional_backend = ConfigFactory::createBackend("file://" + cfg_file_path);
+        if (additional_backend != nullptr)
+        {
+          // Copy all sections and values from this additional file
+          list<string> add_sections = additional_backend->listSections();
+          for (const string& section : add_sections)
+          {
+            list<string> add_tags = additional_backend->listSection(section);
+            for (const string& tag : add_tags)
+            {
+              string value;
+              if (additional_backend->getValue(section, tag, value))
+              {
+                if (!backend->setValue(section, tag, value))
+                {
+                  cerr << "*** WARNING: Failed to set " << section << "/" << tag << " from " << cfg_file_path << endl;
+                }
+              }
+            }
+          }
+        }
+        else
+        {
+          cerr << "*** WARNING: Could not load additional config file: " << cfg_file_path << endl;
+        }
+      }
+      closedir(dir);
+    }
+    else
+    {
+      cerr << "*** WARNING: Could not open CFG_DIR: " << cfg_dir << endl;
+    }
+  }
+  
+  return true;
+} /* ConfigManager::populateFromExistingFiles */
 
 void ConfigManager::populateDefaultConfiguration(ConfigBackend* backend)
 {

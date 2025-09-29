@@ -142,6 +142,16 @@ class ConfigManager
     ConfigBackendPtr initializeBackend(const std::string& config_dir = "");
 
     /**
+     * @brief 	Initialize configuration backend from specific db.conf file
+     * @param 	db_conf_path The full path to the db.conf file to use
+     * @return	Returns a configured backend or nullptr on failure
+     *
+     * This function directly uses the specified db.conf file instead of searching
+     * for it in standard locations.
+     */
+    ConfigBackendPtr initializeBackendFromFile(const std::string& db_conf_path);
+
+    /**
      * @brief   Get the last error message
      * @return  Returns the last error message
      */
@@ -171,6 +181,7 @@ class ConfigManager
     bool findAndParseDbConfig(const std::string& config_dir, DbConfig& config, std::string& db_conf_path);
     bool parseDbConfigFile(const std::string& file_path, DbConfig& config);
     bool initializeDatabase(ConfigBackend* backend);
+    bool populateFromExistingFiles(ConfigBackend* backend);
     void populateDefaultConfiguration(ConfigBackend* backend);
     std::string findConfigFile(const std::string& config_dir, const std::string& filename);
 
