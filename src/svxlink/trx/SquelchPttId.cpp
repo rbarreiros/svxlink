@@ -139,7 +139,7 @@ bool SquelchPttId::initialize(Async::Config& cfg, const std::string& rx_name)
   loadAccountConfiguration(cfg);
 
   // Create DTMF decoder
-  m_dtmf_decoder = std::make_unique<SvxSwDtmfDecoder>(cfg, rx_name);
+  m_dtmf_decoder = std::unique_ptr<SvxSwDtmfDecoder>(new SvxSwDtmfDecoder(cfg, rx_name));
   if (!m_dtmf_decoder->initialize())
   {
     cerr << "*** ERROR: Failed to initialize DTMF decoder for PTT ID detector"
@@ -412,7 +412,7 @@ void SquelchPttId::loadAccountConfiguration(Async::Config& cfg)
 void SquelchPttId::startTimeoutTimer()
 {
   stopTimeoutTimer();
-  m_timeout_timer = std::make_unique<Async::Timer>(m_pttid_timeout_ms);
+  m_timeout_timer = std::unique_ptr<Async::Timer>(new Async::Timer(m_pttid_timeout_ms));
   m_timeout_timer->expired.connect(
       sigc::mem_fun(*this, &SquelchPttId::onTimeout));
 } /* SquelchPttId::startTimeoutTimer */
