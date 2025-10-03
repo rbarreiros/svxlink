@@ -18,7 +18,7 @@ set(LIBSRC
   WbRxRtlSdr.cpp SigLevDet.cpp SigLevDetDdr.cpp
   SvxSwDtmfDecoder.cpp LocalRxSim.cpp SigLevDetSim.cpp
   AfskDtmfDecoder.cpp SigLevDetAfsk.cpp Modulation.cpp
-  SquelchCombine.cpp Squelch.cpp
+  SquelchCombine.cpp Squelch.cpp SquelchPttId.cpp
 )
 include (CheckSymbolExists)
 CHECK_SYMBOL_EXISTS(HIDIOCGRAWINFO linux/hidraw.h HAS_HIDRAW_SUPPORT)

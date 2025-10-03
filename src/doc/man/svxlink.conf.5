@@ -1138,7 +1138,7 @@ to -12) if it does not affect audio quality negatively.
 .TP
 .B SQL_DET
 Specify the type of squelch detector to use. Possible values are: VOX, CTCSS,
-SERIAL, EVDEV, SIGLEV, PTY, GPIO, GPIOD, HIDRAW or COMBINE.
+SERIAL, EVDEV, SIGLEV, PTY, GPIO, GPIOD, HIDRAW, PTTID or COMBINE.
 
 The VOX squelch detector determines if there is a signal
 present by calculating a mean value of the sound samples. The VOX squelch
@@ -1204,6 +1204,30 @@ configurations. This may be good if there is one script handling all functions.
 
 The HIDRAW squelch supports human interface devices (HID), USB devices
 like CM108 soundcard e.g. used in the URI Echolink adapter made by DMK.
+
+The PTTID squelch detector listens for DTMF digits and validates them against
+a configured user database. This provides access control for RF communications
+by requiring users to send their DTMF ID before the squelch opens. The PTT ID
+system supports user accounts with names, active/inactive status, and temporary
+blocking periods.
+
+Configuration example:
+  [Rx1:PTTID]
+  SQL_DET=PTTID
+  PTTID_REQUIRED=1
+  PTTID_TIMEOUT=5000
+
+  [PTTID_USERS]
+  123456=CR7BPM
+  789012=SM0ABC
+
+  [PTTID_ACCOUNTS]
+  CR7BPM_NAME=Rui Barreiros
+  CR7BPM_ACTIVE=1
+  CR7BPM_BLOCKED=0
+  SM0ABC_NAME=John Doe
+  SM0ABC_ACTIVE=1
+  SM0ABC_BLOCKED=30
 
 The COMBINE squelch make it possible to combine multiple squelch types using a
 logical expression. The expression is set up using the SQL_COMBINE
@@ -1584,6 +1608,23 @@ Define the pin your hardware squelch (from RX) is connected to. Valid values
 are VOL_UP, VOL_DN, MUTE_PLAY or MUTE_REC.
 
 Example: HID_SQL_PIN=VOL_UP
+.TP
+.B PTTID_REQUIRED
+If PTTID squelch is used (SQL_DET is set to PTTID), this configuration variable
+determines whether a valid PTT ID is required to open the squelch. If set to 0,
+the PTT ID will be read and stored internally for other tasks but will not be
+required to open the squelch. If set to 1, a valid PTT ID must be received
+before the squelch opens. Default is 0.
+
+Example: PTTID_REQUIRED=1
+.TP
+.B PTTID_TIMEOUT
+If PTTID squelch is used (SQL_DET is set to PTTID), this configuration variable
+sets the timeout in milliseconds for receiving a complete DTMF ID. If no DTMF
+digits are received within this timeout, the squelch will not open. Default is
+5000ms.
+
+Example: PTTID_TIMEOUT=5000
 .TP
 .B SIGLEV_SLOPE
 The slope (or gain) of the signal level detector. See chapter CALIBRATING THE
