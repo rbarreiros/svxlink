@@ -649,6 +649,8 @@ bool ReflectorLogic::initialize(Async::Config& cfgobj, const std::string& logic_
   cfg().getValue(name(), "UDP_HEARTBEAT_INTERVAL",
       m_udp_heartbeat_tx_cnt_reset);
 
+  cfg().valueUpdated.connect(sigc::mem_fun(*this, &ReflectorLogic::cfgUpdated));
+
   Async::Application::app().runTask([&]{ connect(); });
 
   return true;
@@ -2762,6 +2764,53 @@ void ReflectorLogic::csrAddSubjectNamesFromConfig(void)
     }
   }
 } /* ReflectorLogic::csrAddSubjectName */
+
+
+void ReflectorLogic::cfgUpdated(const std::string& section, const std::string& tag)
+{
+  if (section == name())
+  {
+    if (tag == "MUTE_FIRST_TX_LOC")
+    {
+      cfg().getValue(name(), "MUTE_FIRST_TX_LOC", m_mute_first_tx_loc);
+    }
+    else if (tag == "MUTE_FIRST_TX_REM")
+    {
+      cfg().getValue(name(), "MUTE_FIRST_TX_REM", m_mute_first_tx_rem);
+    }
+    else if (tag == "TMP_MONITOR_TIMEOUT")
+    {
+      cfg().getValue(name(), "TMP_MONITOR_TIMEOUT", m_tmp_monitor_timeout);
+    }
+    else if (tag == "UDP_HEARTBEAT_INTERVAL")
+    {
+      cfg().getValue(name(), "UDP_HEARTBEAT_INTERVAL", m_udp_heartbeat_tx_cnt_reset);
+    }
+    else if (tag == "DEFAULT_TG")
+    {
+      cfg().getValue(name(), "DEFAULT_TG", m_default_tg);
+    }
+    else if (tag == "VERBOSE")
+    {
+      cfg().getValue(name(), "VERBOSE", m_verbose);
+    }
+    // Note: CALLSIGN changes would require reconnection, which is complex
+    // For now, just log a warning
+    else if (tag == "CALLSIGN")
+    {
+      std::cerr << "*** WARNING: CALLSIGN configuration change detected. "
+                << "Restart required for this change to take effect." << std::endl;
+    }
+    
+    // Update event handler variables for TCL scripts
+    std::string value;
+    if (cfg().getValue(name(), tag, value))
+    {
+      m_event_handler->setVariable(name() + "::Logic::CFG_" + tag, value);
+      m_event_handler->processEvent("config_updated CFG_" + tag + " \"" + value + "\"");
+    }
+  }
+} /* ReflectorLogic::cfgUpdated */
 
 
 /*

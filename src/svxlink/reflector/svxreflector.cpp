@@ -138,6 +138,7 @@ namespace {
   char*                 logfile_name = nullptr;
   char*                 runasuser = nullptr;
   char*                 config = nullptr;
+  char*                 dbconfig = nullptr;
   int                   daemonize = 0;
   int                   quiet = 0;
   FdWatch*              stdin_watch = 0;
@@ -281,39 +282,74 @@ int main(int argc, const char *argv[])
 
   Config cfg;
   string cfg_filename;
+  
+  // Configuration backend selection logic according to requirements:
+  // 1. If --config is specified, use file backend with that file
+  // 2. If --dbconfig is specified, use database backend with that db config file
+  // 3. If no arguments, search for db.conf in usual places, if found use database backend
+  // 4. If no db.conf found, fall back to file backend with svxreflector.conf in usual places
+  // 5. If neither found, complain and exit
+  
   if (config != NULL)
   {
+    // Case 1: --config specified, use file backend
     cfg_filename = string(config);
+    cout << "Using file backend with config file: " << cfg_filename << endl;
     if (!cfg.openDirect("file://" + cfg_filename))
     {
-      cerr << "*** ERROR: Could not open configuration file: "
-           << config << endl;
+      cerr << "*** ERROR: Could not open configuration file: " << config << endl;
       exit(1);
     }
   }
+  else if (dbconfig != NULL)
+  {
+    // Case 2: --dbconfig specified, use database backend with that db config file
+    string db_config_path = string(dbconfig);
+    cout << "Using database backend with db config file: " << db_config_path << endl;
+    
+    if (!cfg.openFromDbConfig(db_config_path))
+    {
+      cerr << "*** ERROR: Could not initialize database configuration system with: " 
+           << db_config_path << endl;
+      exit(1);
+    }
+    cfg_filename = cfg.getMainConfigFile(); // Get the reference file for CFG_DIR resolution
+  }
   else
   {
-    cfg_filename = string(home_dir);
-    cfg_filename += "/.svxlink/svxreflector.conf";
-    if (!cfg.openDirect("file://" + cfg_filename))
+    // Case 3 & 4: No arguments specified, search for db.conf first, then svxreflector.conf
+    cout << "No configuration arguments specified, searching in standard locations..." << endl;
+    if (!cfg.open())
     {
-      cfg_filename = SVX_SYSCONF_INSTALL_DIR "/svxreflector.conf";
+      // If db.conf search failed, try legacy svxreflector.conf locations
+      cfg_filename = string(home_dir);
+      cfg_filename += "/.svxlink/svxreflector.conf";
       if (!cfg.openDirect("file://" + cfg_filename))
       {
-        cerr << "*** ERROR: Could not open configuration file";
-        if (errno != 0)
+        cfg_filename = SVX_SYSCONF_INSTALL_DIR "/svxreflector.conf";
+        if (!cfg.openDirect("file://" + cfg_filename))
         {
-          cerr << " (" << strerror(errno) << ")";
+          cerr << "*** ERROR: Could not open configuration file";
+          if (errno != 0)
+          {
+            cerr << " (" << strerror(errno) << ")";
+          }
+          cerr << ".\n";
+          cerr << "Tried the following paths:\n"
+               << "\t" << home_dir << "/.svxlink/db.conf\n"
+               << "\t" SVX_SYSCONF_INSTALL_DIR "/db.conf\n"
+               << "\t" << home_dir << "/.svxlink/svxreflector.conf\n"
+               << "\t" SVX_SYSCONF_INSTALL_DIR "/svxreflector.conf\n"
+               << "Possible reasons for failure are: None of the files exist,\n"
+               << "you do not have permission to read the file or there was a\n"
+               << "syntax error in the file.\n";
+          exit(1);
         }
-        cerr << ".\n";
-        cerr << "Tried the following paths:\n"
-             << "\t" << home_dir << "/.svxlink/svxreflector.conf\n"
-             << "\t" SVX_SYSCONF_INSTALL_DIR "/svxreflector.conf\n"
-             << "Possible reasons for failure are: None of the files exist,\n"
-             << "you do not have permission to read the file or there was a\n"
-             << "syntax error in the file.\n";
-        exit(1);
       }
+    }
+    else
+    {
+      cfg_filename = cfg.getMainConfigFile(); // Get the reference file for CFG_DIR resolution
     }
   }
   string main_cfg_filename(cfg_filename);
@@ -325,46 +361,55 @@ int main(int argc, const char *argv[])
     main_cfg_dir = main_cfg_filename.substr(0, slash_pos);
   }
 
-  string cfg_dir;
-  if (cfg.getValue("GLOBAL", "CFG_DIR", cfg_dir))
+  // CFG_DIR processing: Only applies to file backend
+  // Database backend loads ALL configuration from database and ignores files
+  if (cfg.getBackendType() == "file")
   {
-    if (cfg_dir[0] != '/')
+    string cfg_dir;
+    if (cfg.getValue("GLOBAL", "CFG_DIR", cfg_dir))
     {
-      cfg_dir = main_cfg_dir + "/" + cfg_dir;
-    }
-
-    DIR *dir = opendir(cfg_dir.c_str());
-    if (dir == NULL)
-    {
-      cerr << "*** ERROR: Could not read from directory spcified by "
-           << "configuration variable GLOBAL/CFG_DIR=" << cfg_dir << endl;
-      exit(1);
-    }
-
-    struct dirent *dirent;
-    while ((dirent = readdir(dir)) != NULL)
-    {
-      char *dot = strrchr(dirent->d_name, '.');
-      if ((dot == NULL) || (dirent->d_name[0] == '.') ||
-          (strcmp(dot, ".conf") != 0))
+      if (cfg_dir[0] != '/')
       {
-        continue;
+        cfg_dir = main_cfg_dir + "/" + cfg_dir;
       }
-      cfg_filename = cfg_dir + "/" + dirent->d_name;
-      if (!cfg.openDirect("file://" + cfg_filename))
-       {
-	 cerr << "*** ERROR: Could not open configuration file: "
-	      << cfg_filename << endl;
-	 exit(1);
-       }
-    }
 
-    if (closedir(dir) == -1)
-    {
-      cerr << "*** ERROR: Error closing directory specified by"
-           << "configuration variable GLOBAL/CFG_DIR=" << cfg_dir << endl;
-      exit(1);
+      DIR *dir = opendir(cfg_dir.c_str());
+      if (dir == NULL)
+      {
+        cerr << "*** ERROR: Could not read from directory specified by "
+             << "configuration variable GLOBAL/CFG_DIR=" << cfg_dir << endl;
+        exit(1);
+      }
+
+      struct dirent *dirent;
+      while ((dirent = readdir(dir)) != NULL)
+      {
+        char *dot = strrchr(dirent->d_name, '.');
+        if ((dot == NULL) || (dirent->d_name[0] == '.') ||
+            (strcmp(dot, ".conf") != 0))
+        {
+          continue;
+        }
+        cfg_filename = cfg_dir + "/" + dirent->d_name;
+        if (!cfg.openDirect("file://" + cfg_filename))
+        {
+          cerr << "*** ERROR: Could not open configuration file: "
+               << cfg_filename << endl;
+          exit(1);
+        }
+      }
+
+      if (closedir(dir) == -1)
+      {
+        cerr << "*** ERROR: Error closing directory specified by "
+             << "configuration variable GLOBAL/CFG_DIR=" << cfg_dir << endl;
+        exit(1);
+      }
     }
+  }
+  else
+  {
+    cout << "Using " << cfg.getBackendType() << " backend - CFG_DIR processing skipped (all config loaded from database)" << endl;
   }
 
   std::string tstamp_format = "%c";
@@ -451,6 +496,8 @@ static void parse_arguments(int argc, const char **argv)
             "Specify the user to run SvxLink as", "<username>"},
     {"config", 0, POPT_ARG_STRING, &config, 0,
 	    "Specify the configuration file to use", "<filename>"},
+    {"dbconfig", 0, POPT_ARG_STRING, &dbconfig, 0,
+	    "Specify the database configuration file to use", "<filename>"},
     /*
     {"int_arg", 'i', POPT_ARG_INT, &int_arg, 0,
 	    "Description of int argument", "<an int>"},

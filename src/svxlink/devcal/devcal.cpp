@@ -464,6 +464,8 @@ static bool wb_mode = false;
 static int flat_fq_response = false;
 static string cfgfile;
 static string cfgsect;
+static char* config = nullptr;
+static char* dbconfig = nullptr;
 static FdWatch *stdin_watch = 0;
 static SineGenerator *gen = 0;
 static DevPrinter *dp = 0;
@@ -523,11 +525,46 @@ int main(int argc, const char *argv[])
   cout << fixed;
 
   Config cfg;
-  if (!cfg.open(cfgfile))
+  
+  // Configuration backend selection logic
+  if (config != nullptr)
   {
-    cerr << "*** ERROR: Could not open configuration file \""
-         << cfgfile << "\".\n";
-    exit(1);
+    // --config specified, use file backend
+    cout << "Using file backend with config file: " << cfgfile << endl;
+    if (!cfg.openDirect("file://" + cfgfile))
+    {
+      cerr << "*** ERROR: Could not open configuration file \"" << cfgfile << "\".\n";
+      exit(1);
+    }
+  }
+  else if (dbconfig != nullptr)
+  {
+    // --dbconfig specified, use database backend
+    cout << "Using database backend with db config file: " << cfgfile << endl;
+    if (!cfg.openFromDbConfig(cfgfile))
+    {
+      cerr << "*** ERROR: Could not initialize database configuration system with: " 
+           << cfgfile << endl;
+      exit(1);
+    }
+  }
+  else
+  {
+    // Positional argument specified or no config specified, use legacy file backend
+    if (!cfgfile.empty())
+    {
+      cout << "Using file backend with config file: " << cfgfile << endl;
+      if (!cfg.openDirect("file://" + cfgfile))
+      {
+        cerr << "*** ERROR: Could not open configuration file \"" << cfgfile << "\".\n";
+        exit(1);
+      }
+    }
+    else
+    {
+      cerr << "*** ERROR: No configuration file specified. Use --config, --dbconfig, or provide config file as argument.\n";
+      exit(1);
+    }
   }
 
   AudioIO *audio_io = 0;
@@ -733,10 +770,10 @@ static void parse_arguments(int argc, const char **argv)
 	    "The maximum deviation for the channel", "<deviation in Hz>"},
     {"headroom", 'H', POPT_ARG_FLOAT | POPT_ARGFLAG_SHOW_DEFAULT,
             &headroom_db, 0, "The headroom to use", "<headroom in dB>"},
-    /*
     {"config", 0, POPT_ARG_STRING, &config, 0,
 	    "Specify the configuration file to use", "<filename>"},
-    */
+    {"dbconfig", 0, POPT_ARG_STRING, &dbconfig, 0,
+	    "Specify the database configuration file to use", "<filename>"},
     {"rxcal", 'r', POPT_ARG_NONE, &cal_rx, 0, "Do receiver calibration", NULL},
     {"txcal", 't', POPT_ARG_NONE, &cal_tx, 0,
             "Do transmitter calibration", NULL},
@@ -775,7 +812,15 @@ static void parse_arguments(int argc, const char **argv)
     switch (argcnt++)
     {
       case 0:
-        cfgfile = arg;
+        if (config == nullptr && dbconfig == nullptr)
+        {
+          cfgfile = arg;
+        }
+        else
+        {
+          cfgsect = arg;
+          argcnt = 2; // Skip to section parsing since config file was specified via flag
+        }
         break;
       case 1:
         cfgsect = arg;
@@ -785,6 +830,16 @@ static void parse_arguments(int argc, const char **argv)
         poptPrintUsage(optCon, stderr, 0);
         exit(1);
     }
+  }
+  
+  // Handle new configuration arguments
+  if (config != nullptr)
+  {
+    cfgfile = string(config);
+  }
+  else if (dbconfig != nullptr)
+  {
+    cfgfile = string(dbconfig);
   }
 
   if (print_version)

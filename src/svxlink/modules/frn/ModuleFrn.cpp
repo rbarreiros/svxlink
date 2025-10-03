@@ -485,6 +485,20 @@ void ModuleFrn::onQsoError(void)
   deactivateMe();
 }
 
+
+void ModuleFrn::cfgUpdated(const std::string& section, const std::string& tag)
+{
+  // Call parent implementation first
+  Module::cfgUpdated(section, tag);
+  
+  // Update QsoFrn configuration if this is our section
+  if (section == cfgName() && qso != nullptr)
+  {
+    qso->updateConfig(cfg(), cfgName());
+  }
+} /* ModuleFrn::cfgUpdated */
+
+
 /*
  * This file has not been truncated
  */

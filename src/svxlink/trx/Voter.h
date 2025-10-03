@@ -192,6 +192,7 @@ class Voter : public Rx
   protected:
     
   private:
+    void cfgUpdated(const std::string& section, const std::string& tag);
     static CONSTEXPR float    DEFAULT_HYSTERESIS             = 1.5f;
     static CONSTEXPR unsigned DEFAULT_VOTING_DEALAY          = 0;
     static CONSTEXPR unsigned DEFAULT_SQL_CLOSE_REVOTE_DELAY = 500;
