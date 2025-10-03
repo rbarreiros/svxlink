@@ -68,6 +68,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 #include "LogicBase.h"
 #include "CmdParser.h"
+#include "LogicScheduler.h"
 
 
 
@@ -261,6 +262,8 @@ class Logic : public LogicBase
     CmdParser 	      	      	    cmd_parser;
     Async::AtTimer      	    every_minute_timer;
     Async::AtTimer      	    every_second_timer;
+    LogicScheduler      	    *scheduler;
+    float                           m_ctcss_to_tg_last_fq;
     Async::AudioRecorder  	    *recorder;
     Async::AudioMixer	      	    *tx_audio_mixer;
     Async::AudioAmp   	      	    *fx_gain_ctrl;
@@ -291,7 +294,6 @@ class Logic : public LogicBase
     std::map<uint16_t, uint32_t>    m_ctcss_to_tg;
     Async::Pty                      *command_pty;
     Async::Timer                    m_ctcss_to_tg_timer;
-    float                           m_ctcss_to_tg_last_fq;
     std::string                     m_macro_prefix                {"D"};
 
     void loadModules(void);

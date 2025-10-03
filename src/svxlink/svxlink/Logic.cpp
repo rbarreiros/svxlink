@@ -170,7 +170,8 @@ Logic::Logic(void)
     currently_set_tx_ctrl_mode(Tx::TX_OFF), is_online(true),
     dtmf_digit_handler(0),                  state_pty(0),
     dtmf_ctrl_pty(0),                       command_pty(0),
-    m_ctcss_to_tg_timer(-1),                m_ctcss_to_tg_last_fq(-1.0f)
+    m_ctcss_to_tg_timer(-1),                m_ctcss_to_tg_last_fq(-1.0f),
+    scheduler(0)
 {
   rgr_sound_timer.expired.connect(sigc::hide(
         mem_fun(*this, &Logic::sendRgrSound)));
@@ -687,6 +688,14 @@ bool Logic::initialize(Async::Config& cfgobj, const std::string& logic_name)
   every_minute_timer.expired.connect(mem_fun(*this, &Logic::everyMinute));
   timeoutNextMinute();
   every_minute_timer.start();
+  
+  // Initialize scheduler
+  scheduler = new LogicScheduler(this);
+  if (!scheduler->initialize()) {
+    cerr << "*** ERROR: Failed to initialize scheduler for logic " << name() << endl;
+    delete scheduler;
+    scheduler = 0;
+  }
 
   every_second_timer.setExpireOffset(100);
   every_second_timer.expired.connect(mem_fun(*this, &Logic::everySecond));
@@ -1065,6 +1074,7 @@ void Logic::remoteReceivedTgUpdated(LogicBase *src_logic, uint32_t tg)
 Logic::~Logic(void)
 {
   cleanup();
+  delete scheduler;
   delete logic_con_out;
   delete logic_con_in;
   delete dtmf_digit_handler;
@@ -1553,6 +1563,27 @@ void Logic::processCommand(const std::string &cmd, bool force_core_cmd)
 	processEvent(ss.str());
       }
     }
+    else if (scheduler != 0 && cmd == "0")
+    {
+      // Show scheduler status
+      scheduler->showStatus();
+    }
+    else if (scheduler != 0 && cmd == "1")
+    {
+      // Reload scheduler configuration
+      scheduler->reloadConfig();
+    }
+    else if (scheduler != 0 && cmd == "2")
+    {
+      // Toggle scheduler debug mode
+      scheduler->setDebug(!scheduler->isEnabled());
+    }
+    else if (scheduler != 0 && cmd.length() > 2 && cmd.substr(0, 2) == "99")
+    {
+      // Trigger specific message: 99<message_name>
+      string msg_name = cmd.substr(2);
+      scheduler->triggerMessage(msg_name);
+    }
     else if (!cmd_parser.processCmd(cmd))
     {
       stringstream ss;
@@ -1687,6 +1718,12 @@ void Logic::timeoutNextMinute(void)
 void Logic::everyMinute(AtTimer *t)
 {
   processEvent("every_minute");
+  
+  // Check scheduled messages
+  if (scheduler != 0) {
+    scheduler->checkScheduledMessages();
+  }
+  
   timeoutNextMinute();
 } /* Logic::everyMinute */
 
