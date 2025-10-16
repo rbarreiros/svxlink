@@ -61,6 +61,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <LocationInfo.h>
 #include <common.h>
 #include <config.h>
+#include <LogWriter.h>
 
 
 /****************************************************************************
@@ -72,7 +73,6 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "version/SVXLINK.h"
 #include "Logic.h"
 #include "LinkManager.h"
-#include "LogWriter.h"
 
 
 /****************************************************************************
@@ -179,7 +179,12 @@ int main(int argc, char **argv)
 
   parse_arguments(argc, const_cast<const char **>(argv));
 
-  int noclose = 0;
+  if (daemonize && (daemon(1, 0) == -1))
+  {
+    perror("daemon");
+    exit(1);
+  }
+
   if (quiet || (logfile_name != 0))
   {
     int devnull = open("/dev/null", O_RDWR);
@@ -211,20 +216,8 @@ int main(int argc, char **argv)
         perror("dup2(stdin)");
         exit(1);
       }
-
-        /* Tell the daemon function call not to close the file descriptors */
-      noclose = 1;
     }
     close(devnull);
-  }
-
-  if (daemonize)
-  {
-    if (daemon(0, noclose) == -1)
-    {
-      perror("daemon");
-      exit(1);
-    }
   }
 
   if (pidfile_name != NULL)
@@ -719,7 +712,7 @@ static void sighup_handler(int signal)
     cout << "Ignoring SIGHUP\n";
     return;
   }
-  std::cout << "SIGPIPE received" << std::endl;
+  std::cout << "SIGHUP received" << std::endl;
   logwriter.reopenLogfile();
 } /* sighup_handler */
 

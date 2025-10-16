@@ -379,13 +379,17 @@ void ReflectorClient::updateIsTalker(void)
     bool is_talker = (talker == this);
     bool was_talker = (*m_status).isMember("isTalker") && (*m_status)["isTalker"].asBool();
     
-    (*m_status)["isTalker"] = is_talker;
+    (*m_status)["isTalker"] = (
+        TGHandler::instance()->showActivity(m_current_tg) &&
+        (talker == this)
+        );
     
     // Track when talking starts
     if (is_talker && !was_talker)
     {
       gettimeofday(&m_talking_start_time, NULL);
     }
+
   }
 } /* ReflectorClient:;updateIsTalker */
 
@@ -566,10 +570,14 @@ void ReflectorClient::onFrameReceived(FramedTcpConnection *con,
 
   if ((m_con_state != STATE_CONNECTED) && (header.type() >= 100))
   {
-    std::cout << "*** ERROR[" << idss.str()
-              << "]: User message received in unauthenticated state"
+      // FIXME: This should really be an error and the client should be
+      // disconnected but it will cause too much problems in existing
+      // misbeaving clients at the moment.
+    std::cout << "*** WARNING[" << idss.str()
+              << "]: User message " << header.type()
+              << " received in unauthenticated state"
               << std::endl;
-    sendError("Protocol error");
+    //sendError("Protocol error");
     return;
   }
 
