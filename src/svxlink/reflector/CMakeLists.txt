@@ -45,6 +45,12 @@ set_target_properties(svxreflector PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY ${RUNTIME_OUTPUT_DIRECTORY}
 )
 
+# Ensure C++17 standard for MQTT library compatibility
+if(PahoMqttCpp_FOUND)
+  set_property(TARGET svxreflector PROPERTY CXX_STANDARD 17)
+  set_property(TARGET svxreflector PROPERTY CXX_STANDARD_REQUIRED ON)
+endif()
+
 # Generate config file with correct paths
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/svxreflector.conf.in
   ${CMAKE_CURRENT_BINARY_DIR}/svxreflector.conf
