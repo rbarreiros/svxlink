@@ -71,6 +71,11 @@ using namespace Async;
  *
  ****************************************************************************/
 
+#ifdef HAS_SQLITE_SUPPORT
+// Factory registration for SQLite backend
+static ConfigBackendSpecificFactory<SQLiteConfigBackend> sqlite_factory("sqlite");
+#endif
+
 /****************************************************************************
  *
  * Prototypes
@@ -96,7 +101,7 @@ using namespace Async;
  ****************************************************************************/
 
 SQLiteConfigBackend::SQLiteConfigBackend(void)
-  : m_db(nullptr)
+  : ConfigBackend(true, 300000), m_db(nullptr), m_last_check_time("1970-01-01 00:00:00")
 {
 } /* SQLiteConfigBackend::SQLiteConfigBackend */
 
@@ -236,6 +241,7 @@ bool SQLiteConfigBackend::setValue(const std::string& section, const std::string
     return false;
   }
   
+  notifyValueChanged(section, tag, value);
   return true;
 } /* SQLiteConfigBackend::setValue */
 
@@ -328,6 +334,55 @@ std::string SQLiteConfigBackend::getBackendInfo(void) const
 {
   return m_db_path;
 } /* SQLiteConfigBackend::getBackendInfo */
+
+bool SQLiteConfigBackend::checkForExternalChanges(void)
+{
+  if (!isOpen())
+  {
+    return false;
+  }
+
+  // Query for all records updated since last check
+  const char* sql = "SELECT section, tag, value, updated_at FROM config WHERE updated_at > ? ORDER BY updated_at";
+  sqlite3_stmt* stmt;
+
+  int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
+  if (rc != SQLITE_OK)
+  {
+    cerr << "*** ERROR: Failed to prepare change detection query: " << getLastError() << endl;
+    return false;
+  }
+
+  sqlite3_bind_text(stmt, 1, m_last_check_time.c_str(), -1, SQLITE_STATIC);
+
+  bool changes_detected = false;
+  std::string latest_timestamp = m_last_check_time;
+
+  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW)
+  {
+    const char* section = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+    const char* tag = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+    const char* value = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+    const char* updated_at = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
+
+    if (section && tag && value && updated_at)
+    {
+      valueChanged(std::string(section), std::string(tag), std::string(value));
+      latest_timestamp = std::string(updated_at);
+      changes_detected = true;
+    }
+  }
+
+  sqlite3_finalize(stmt);
+
+  // Update last check time to the latest timestamp seen
+  if (changes_detected)
+  {
+    m_last_check_time = latest_timestamp;
+  }
+
+  return changes_detected;
+} /* SQLiteConfigBackend::checkForExternalChanges */
 
 /****************************************************************************
  *

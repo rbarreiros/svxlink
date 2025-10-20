@@ -219,6 +219,66 @@ class Config
      * This method returns the type of configuration backend currently in use.
      */
     std::string getBackendType(void) const;
+
+    /**
+     * @brief   Get direct access to the configuration backend
+     * @return  Pointer to the ConfigBackend or nullptr if not open
+     *
+     * This provides direct access to the backend for advanced operations
+     * like enabling change notifications or starting auto-polling.
+     */
+    ConfigBackend* getBackend(void);
+
+    /**
+     * @brief   Reload the configuration from its source
+     *
+     * This method forces a reload of all configuration values from the backend.
+     * For database backends, it calls checkForExternalChanges() first.
+     * After reloading, it triggers all subscribeValue callbacks for values that changed.
+     */
+    void reload(void);
+
+    /**
+     * @brief Result structure for openWithFallback()
+     */
+    struct ConfigLoadResult
+    {
+      bool success;                  ///< Whether config was successfully loaded
+      std::string source_type;       ///< "command_line", "dbconfig", "default", or "none"
+      std::string source_path;       ///< Path to the config file or db.conf
+      std::string backend_type;      ///< Backend type used (file/sqlite/mysql/postgresql)
+      std::string error_message;     ///< Error message if success == false
+      bool used_dbconfig;            ///< True if configuration came from db.conf
+    };
+
+    /**
+     * @brief   Smart configuration initialization with fallback
+     * @param   cmdline_config Path from --config option (empty if not provided)
+     * @param   cmdline_dbconfig Path from --dbconfig option (empty if not provided)
+     * @param   default_config_name Default config filename (e.g., "svxlink.conf")
+     * @return  ConfigLoadResult with detailed information
+     *
+     * This method implements a complete configuration initialization cascade:
+     * 1. If --config provided: use openDirect() with that file
+     * 2. If --dbconfig provided: use openFromDbConfig() with that file
+     * 3. Search for db.conf in standard locations, use if found
+     * 4. Search for default_config_name in standard locations, use if found
+     * 5. Fail with detailed error information
+     *
+     * Example usage:
+     * @code
+     * Async::Config cfg;
+     * auto result = cfg.openWithFallback(config_arg, dbconfig_arg, "svxlink.conf");
+     * if (!result.success) {
+     *   cerr << "*** ERROR: " << result.error_message << endl;
+     *   return 1;
+     * }
+     * cout << "Configuration loaded from: " << result.source_path << endl;
+     * @endcode
+     */
+    ConfigLoadResult openWithFallback(const std::string& cmdline_config,
+                                      const std::string& cmdline_dbconfig,
+                                      const std::string& default_config_name);
     
     /**
      * @brief 	Return the string value of the given configuration variable
@@ -796,6 +856,8 @@ class Config
 
     void loadFromBackend(void);
     void syncToBackend(const std::string& section, const std::string& tag);
+    void onBackendValueChanged(const std::string& section, const std::string& tag, const std::string& value);
+    void connectBackendSignals(void);
 
     template <class T>
     bool setValueFromString(T& val, const std::string &str) const

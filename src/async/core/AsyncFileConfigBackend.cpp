@@ -76,6 +76,9 @@ using namespace Async;
  *
  ****************************************************************************/
 
+// Factory registration for file backend
+static ConfigBackendSpecificFactory<FileConfigBackend> file_factory("file");
+
 /****************************************************************************
  *
  * Prototypes
@@ -101,7 +104,7 @@ using namespace Async;
  ****************************************************************************/
 
 FileConfigBackend::FileConfigBackend(void)
-  : m_is_open(false)
+  : ConfigBackend(false, 0), m_is_open(false)
 {
 } /* FileConfigBackend::FileConfigBackend */
 
@@ -182,6 +185,7 @@ bool FileConfigBackend::setValue(const std::string& section, const std::string& 
 
   Values &values = m_sections[section];
   values[tag].val = value;
+  notifyValueChanged(section, tag, value);
   return true;
 } /* FileConfigBackend::setValue */
 

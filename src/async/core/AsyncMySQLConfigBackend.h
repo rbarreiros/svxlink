@@ -205,6 +205,12 @@ class MySQLConfigBackend : public ConfigBackend
      */
     virtual std::string getBackendInfo(void) const override;
 
+    /**
+     * @brief   Check for external changes to the database
+     * @return  true if changes were detected, false otherwise
+     */
+    virtual bool checkForExternalChanges(void) override;
+
   protected:
 
   private:
@@ -220,6 +226,7 @@ class MySQLConfigBackend : public ConfigBackend
     MYSQL*           m_mysql;
     ConnectionParams m_conn_params;
     std::string      m_connection_string;
+    std::string      m_last_check_time;
 
     bool parseConnectionString(const std::string& conn_str, ConnectionParams& params);
     bool createTables(void);

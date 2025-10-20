@@ -45,7 +45,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 #include <AsyncConfig.h>
-#include <AsyncConfigFactory.h>
+#include <AsyncConfigBackend.h>
+#include <AsyncConfigSource.h>
 
 /****************************************************************************
  *
@@ -149,21 +150,21 @@ int main(int argc, char **argv)
 void showAvailableBackends()
 {
   cout << "Available configuration backends: " 
-       << ConfigFactory::getAvailableBackends() << endl << endl;
+       << ConfigSource::availableBackendsString() << endl << endl;
 
   // Show detailed availability
   cout << "Backend availability:" << endl;
   cout << "  File:       " 
-       << (ConfigFactory::isBackendAvailable(ConfigFactory::BACKEND_FILE) ? "Yes" : "No") 
+       << (ConfigSource::isBackendAvailable("file") ? "Yes" : "No") 
        << endl;
   cout << "  SQLite:     " 
-       << (ConfigFactory::isBackendAvailable(ConfigFactory::BACKEND_SQLITE) ? "Yes" : "No") 
+       << (ConfigSource::isBackendAvailable("sqlite") ? "Yes" : "No") 
        << endl;
   cout << "  MySQL:      " 
-       << (ConfigFactory::isBackendAvailable(ConfigFactory::BACKEND_MYSQL) ? "Yes" : "No") 
+       << (ConfigSource::isBackendAvailable("mysql") ? "Yes" : "No") 
        << endl;
   cout << "  PostgreSQL: " 
-       << (ConfigFactory::isBackendAvailable(ConfigFactory::BACKEND_POSTGRESQL) ? "Yes" : "No") 
+       << (ConfigSource::isBackendAvailable("postgresql") ? "Yes" : "No") 
        << endl << endl;
 } /* showAvailableBackends */
 

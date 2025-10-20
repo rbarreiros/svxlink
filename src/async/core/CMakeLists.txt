@@ -11,7 +11,7 @@ set(EXPINC AsyncApplication.h AsyncFdWatch.h AsyncTimer.h AsyncIpAddress.h
            AsyncSslContext.h AsyncSslKeypair.h AsyncSslCertSigningReq.h
            AsyncSslX509.h AsyncSslX509Extensions.h
            AsyncSslX509ExtSubjectAltName.h AsyncDigest.h
-           AsyncConfigBackend.h AsyncConfigFactory.h AsyncConfigManager.h)
+           AsyncConfigBackend.h AsyncConfigSource.h AsyncConfigManager.h)
 
 # Base library sources
 set(LIBSRC_BASE AsyncApplication.cpp AsyncFdWatch.cpp AsyncTimer.cpp
@@ -23,7 +23,7 @@ set(LIBSRC_BASE AsyncApplication.cpp AsyncFdWatch.cpp AsyncTimer.cpp
            AsyncFramedTcpConnection.cpp AsyncHttpServerConnection.cpp
            AsyncTcpPrioClientBase.cpp AsyncPlugin.cpp
            AsyncEncryptedUdpSocket.cpp
-           AsyncConfigManager.cpp AsyncConfigFactory.cpp AsyncFileConfigBackend.cpp)
+           AsyncConfigManager.cpp AsyncConfigBackend.cpp AsyncConfigSource.cpp AsyncFileConfigBackend.cpp)
 
 # Initialize library sources with base sources
 set(LIBSRC ${LIBSRC_BASE})

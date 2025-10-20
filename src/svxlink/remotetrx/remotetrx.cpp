@@ -330,82 +330,19 @@ int main(int argc, char **argv)
   }
   
   Config cfg;
-  string cfg_filename;
+  auto result = cfg.openWithFallback(config ? string(config) : "",
+                                      dbconfig ? string(dbconfig) : "",
+                                      "remotetrx.conf");
+  if (!result.success)
+  {
+    cerr << "*** ERROR: " << result.error_message << endl;
+    exit(1);
+  }
+
+  cout << "Configuration loaded from: " << result.source_path 
+       << " (" << result.backend_type << " backend)" << endl;
   
-  // Configuration backend selection logic according to requirements:
-  // 1. If --config is specified, use file backend with that file
-  // 2. If --dbconfig is specified, use database backend with that db config file
-  // 3. If no arguments, search for db.conf in usual places, if found use database backend
-  // 4. If no db.conf found, fall back to file backend with remotetrx.conf in usual places
-  // 5. If neither found, complain and exit
-  
-  if (config != NULL)
-  {
-    // Case 1: --config specified, use file backend
-    cfg_filename = string(config);
-    cout << "Using file backend with config file: " << cfg_filename << endl;
-    if (!cfg.openDirect("file://" + cfg_filename))
-    {
-      cerr << "*** ERROR: Could not open configuration file: " << config << endl;
-      exit(1);
-    }
-  }
-  else if (dbconfig != NULL)
-  {
-    // Case 2: --dbconfig specified, use database backend with that db config file
-    string db_config_path = string(dbconfig);
-    cout << "Using database backend with db config file: " << db_config_path << endl;
-    
-    if (!cfg.openFromDbConfig(db_config_path))
-    {
-      cerr << "*** ERROR: Could not initialize database configuration system with: " 
-           << db_config_path << endl;
-      exit(1);
-    }
-    cfg_filename = cfg.getMainConfigFile(); // Get the reference file for CFG_DIR resolution
-  }
-  else
-  {
-    // Case 3 & 4: No arguments specified, search for db.conf first, then remotetrx.conf
-    cout << "No configuration arguments specified, searching in standard locations..." << endl;
-    if (!cfg.open())
-    {
-      // If db.conf search failed, try legacy remotetrx.conf locations
-      cfg_filename = string(home_dir);
-      cfg_filename += "/.svxlink/remotetrx.conf";
-      if (!cfg.openDirect("file://" + cfg_filename))
-      {
-        cfg_filename = SVX_SYSCONF_INSTALL_DIR "/remotetrx.conf";
-        if (!cfg.openDirect("file://" + cfg_filename))
-        {
-          cfg_filename = SYSCONF_INSTALL_DIR "/remotetrx.conf";
-          if (!cfg.openDirect("file://" + cfg_filename))
-          {
-            cerr << "*** ERROR: Could not open configuration file";
-            if (errno != 0)
-            {
-              cerr << " (" << strerror(errno) << ")";
-            }
-            cerr << ".\n";
-            cerr << "Tried the following paths:\n"
-                 << "\t" << home_dir << "/.svxlink/db.conf\n"
-                 << "\t" SVX_SYSCONF_INSTALL_DIR "/db.conf\n"
-                 << "\t" << home_dir << "/.svxlink/remotetrx.conf\n"
-                 << "\t" SVX_SYSCONF_INSTALL_DIR "/remotetrx.conf\n"
-                 << "\t" SYSCONF_INSTALL_DIR "/remotetrx.conf\n"
-                 << "Possible reasons for failure are: None of the files exist,\n"
-                 << "you do not have permission to read the file or there was a\n"
-                 << "syntax error in the file.\n";
-            exit(1);
-          }
-        }
-      }
-    }
-    else
-    {
-      cfg_filename = cfg.getMainConfigFile(); // Get the reference file for CFG_DIR resolution
-    }
-  }
+  string cfg_filename = result.source_path;
   string main_cfg_filename(cfg_filename);
   
   // CFG_DIR processing: Only applies to file backend

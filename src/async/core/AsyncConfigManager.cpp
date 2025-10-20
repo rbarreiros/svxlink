@@ -54,7 +54,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 #include "AsyncConfigManager.h"
-#include "AsyncConfigFactory.h"
+#include "AsyncConfigBackend.h"
+#include "AsyncConfigSource.h"
 
 /****************************************************************************
  *
@@ -152,35 +153,11 @@ ConfigBackendPtr ConfigManager::initializeBackend(const std::string& config_dir)
   }
   
   // Check if the requested backend type is available
-  ConfigFactory::BackendType backend_type = ConfigFactory::BACKEND_UNKNOWN;
-  if (db_config.type == "file")
-  {
-    backend_type = ConfigFactory::BACKEND_FILE;
-  }
-  else if (db_config.type == "sqlite")
-  {
-    backend_type = ConfigFactory::BACKEND_SQLITE;
-  }
-  else if (db_config.type == "mysql")
-  {
-    backend_type = ConfigFactory::BACKEND_MYSQL;
-  }
-  else if (db_config.type == "postgresql")
-  {
-    backend_type = ConfigFactory::BACKEND_POSTGRESQL;
-  }
-  else
-  {
-    m_last_error = "Unknown backend type: " + db_config.type;
-    cerr << "*** ERROR: " << m_last_error << endl;
-    return nullptr;
-  }
-  
-  if (!ConfigFactory::isBackendAvailable(backend_type))
+  if (!ConfigSource::isBackendAvailable(db_config.type))
   {
     m_last_error = "Backend '" + db_config.type + "' is not available (not compiled in)";
     cerr << "*** ERROR: " << m_last_error << endl;
-    cerr << "Available backends: " << ConfigFactory::getAvailableBackends() << endl;
+    cerr << "Available backends: " << ConfigSource::availableBackendsString() << endl;
     return nullptr;
   }
   
@@ -199,12 +176,20 @@ ConfigBackendPtr ConfigManager::initializeBackend(const std::string& config_dir)
     source_url = db_config.source; // Already includes protocol for mysql/postgresql
   }
   
-  ConfigBackendPtr backend = ConfigFactory::createBackend(source_url);
+  ConfigBackendPtr backend = createConfigBackend(source_url);
   if (backend == nullptr)
   {
     m_last_error = "Failed to create " + db_config.type + " backend";
     cerr << "*** ERROR: " << m_last_error << endl;
     return nullptr;
+  }
+  
+  // Apply db.conf notification settings to the backend
+  backend->enableChangeNotifications(db_config.enable_change_notifications);
+  if (db_config.enable_change_notifications && db_config.poll_interval_seconds > 0)
+  {
+    backend->startAutoPolling(db_config.poll_interval_seconds * 1000); // Convert to milliseconds
+    cout << "Auto-polling enabled with interval: " << db_config.poll_interval_seconds << " seconds" << endl;
   }
   
   cout << "Successfully initialized " << backend->getBackendType() 
@@ -249,35 +234,11 @@ ConfigBackendPtr ConfigManager::initializeBackendFromFile(const std::string& db_
   }
   
   // Check if the requested backend type is available
-  ConfigFactory::BackendType backend_type = ConfigFactory::BACKEND_UNKNOWN;
-  if (db_config.type == "file")
-  {
-    backend_type = ConfigFactory::BACKEND_FILE;
-  }
-  else if (db_config.type == "sqlite")
-  {
-    backend_type = ConfigFactory::BACKEND_SQLITE;
-  }
-  else if (db_config.type == "mysql")
-  {
-    backend_type = ConfigFactory::BACKEND_MYSQL;
-  }
-  else if (db_config.type == "postgresql")
-  {
-    backend_type = ConfigFactory::BACKEND_POSTGRESQL;
-  }
-  else
-  {
-    m_last_error = "Unknown backend type: " + db_config.type;
-    cerr << "*** ERROR: " << m_last_error << endl;
-    return nullptr;
-  }
-  
-  if (!ConfigFactory::isBackendAvailable(backend_type))
+  if (!ConfigSource::isBackendAvailable(db_config.type))
   {
     m_last_error = "Backend '" + db_config.type + "' is not available (not compiled in)";
     cerr << "*** ERROR: " << m_last_error << endl;
-    cerr << "Available backends: " << ConfigFactory::getAvailableBackends() << endl;
+    cerr << "Available backends: " << ConfigSource::availableBackendsString() << endl;
     return nullptr;
   }
   
@@ -296,12 +257,20 @@ ConfigBackendPtr ConfigManager::initializeBackendFromFile(const std::string& db_
     source_url = db_config.source; // Already includes protocol for mysql/postgresql
   }
   
-  ConfigBackendPtr backend = ConfigFactory::createBackend(source_url);
+  ConfigBackendPtr backend = createConfigBackend(source_url);
   if (backend == nullptr)
   {
     m_last_error = "Failed to create " + db_config.type + " backend";
     cerr << "*** ERROR: " << m_last_error << endl;
     return nullptr;
+  }
+  
+  // Apply db.conf notification settings to the backend
+  backend->enableChangeNotifications(db_config.enable_change_notifications);
+  if (db_config.enable_change_notifications && db_config.poll_interval_seconds > 0)
+  {
+    backend->startAutoPolling(db_config.poll_interval_seconds * 1000); // Convert to milliseconds
+    cout << "Auto-polling enabled with interval: " << db_config.poll_interval_seconds << " seconds" << endl;
   }
   
   cout << "Successfully initialized " << backend->getBackendType() 
@@ -407,6 +376,14 @@ bool ConfigManager::parseDbConfigFile(const std::string& file_path, DbConfig& co
         {
           config.source = value;
         }
+        else if (key == "ENABLE_CHANGE_NOTIFICATIONS")
+        {
+          config.enable_change_notifications = (value == "1" || value == "true" || value == "TRUE" || value == "yes" || value == "YES");
+        }
+        else if (key == "POLL_INTERVAL")
+        {
+          config.poll_interval_seconds = std::stoul(value);
+        }
       }
     }
   }
@@ -481,7 +458,7 @@ bool ConfigManager::populateFromExistingFiles(ConfigBackend* backend)
   cout << "Loading existing configuration to populate database..." << endl;
   
   // Create a temporary file backend to read the existing configuration
-  ConfigBackendPtr file_backend = ConfigFactory::createBackend("file://" + config_file);
+  ConfigBackendPtr file_backend = createConfigBackend("file://" + config_file);
   if (file_backend == nullptr)
   {
     cerr << "*** WARNING: Could not create file backend for " << config_file << endl;
@@ -542,7 +519,7 @@ bool ConfigManager::populateFromExistingFiles(ConfigBackend* backend)
         string cfg_file_path = cfg_dir + "/" + dirent->d_name;
         cout << "Loading additional config file: " << cfg_file_path << endl;
         
-        ConfigBackendPtr additional_backend = ConfigFactory::createBackend("file://" + cfg_file_path);
+        ConfigBackendPtr additional_backend = createConfigBackend("file://" + cfg_file_path);
         if (additional_backend != nullptr)
         {
           // Copy all sections and values from this additional file

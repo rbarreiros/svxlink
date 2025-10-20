@@ -206,12 +206,19 @@ class PostgreSQLConfigBackend : public ConfigBackend
      */
     virtual std::string getBackendInfo(void) const override;
 
+    /**
+     * @brief   Check for external changes to the database
+     * @return  true if changes were detected, false otherwise
+     */
+    virtual bool checkForExternalChanges(void) override;
+
   protected:
 
   private:
     PGconn*     m_conn;
     std::string m_connection_string;
     std::string m_connection_info;
+    std::string m_last_check_time;
 
     bool createTables(void);
     bool executeQuery(const std::string& query) const;

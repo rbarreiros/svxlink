@@ -323,17 +323,38 @@ int main(int argc, char **argv)
 
   if (argc < 3)
   {
-    cerr << "Usage: siglevdetcal <config file> <receiver section>\n";
+    cerr << "Usage: siglevdetcal <config file or db.conf> <receiver section>\n";
+    cerr << "  <config file or db.conf> can be:\n";
+    cerr << "    - Path to a regular configuration file (e.g., /etc/svxlink/svxlink.conf)\n";
+    cerr << "    - Path to a db.conf file (e.g., /etc/svxlink/db.conf)\n";
     exit(1);
   }
   string cfg_file(argv[1]);
   string rx_name(argv[2]);
   
-  if (!cfg.open(cfg_file))
+  // Auto-detect if this is a db.conf file or regular config file
+  bool is_dbconf = (cfg_file.find("db.conf") != string::npos);
+  
+  bool config_loaded = false;
+  if (is_dbconf)
   {
-    cerr << "*** ERROR: Could not open config file \"" << cfg_file << "\"\n";
+    cout << "Detected db.conf file, loading database configuration..." << endl;
+    config_loaded = cfg.openFromDbConfig(cfg_file);
+  }
+  else
+  {
+    cout << "Loading file-based configuration..." << endl;
+    config_loaded = cfg.openDirect("file://" + cfg_file);
+  }
+  
+  if (!config_loaded)
+  {
+    cerr << "*** ERROR: Could not open configuration from \"" << cfg_file << "\"\n";
     exit(1);
   }
+  
+  cout << "Configuration loaded from " << cfg_file 
+       << " using " << cfg.getBackendType() << " backend" << endl;
   
   string value;
   if (cfg.getValue("GLOBAL", "CARD_SAMPLE_RATE", value))

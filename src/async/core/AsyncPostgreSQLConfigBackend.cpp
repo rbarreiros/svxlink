@@ -71,6 +71,11 @@ using namespace Async;
  *
  ****************************************************************************/
 
+#ifdef HAS_POSTGRESQL_SUPPORT
+// Factory registration for PostgreSQL backend
+static ConfigBackendSpecificFactory<PostgreSQLConfigBackend> postgresql_factory("postgresql");
+#endif
+
 /****************************************************************************
  *
  * Prototypes
@@ -96,7 +101,7 @@ using namespace Async;
  ****************************************************************************/
 
 PostgreSQLConfigBackend::PostgreSQLConfigBackend(void)
-  : m_conn(nullptr)
+  : ConfigBackend(true, 300000), m_conn(nullptr), m_last_check_time("1970-01-01 00:00:00")
 {
 } /* PostgreSQLConfigBackend::PostgreSQLConfigBackend */
 
@@ -223,6 +228,7 @@ bool PostgreSQLConfigBackend::setValue(const std::string& section, const std::st
   }
   
   PQclear(result);
+  notifyValueChanged(section, tag, value);
   return true;
 } /* PostgreSQLConfigBackend::setValue */
 
@@ -305,6 +311,63 @@ std::string PostgreSQLConfigBackend::getBackendInfo(void) const
 {
   return m_connection_info;
 } /* PostgreSQLConfigBackend::getBackendInfo */
+
+bool PostgreSQLConfigBackend::checkForExternalChanges(void)
+{
+  if (!isOpen())
+  {
+    return false;
+  }
+
+  // Query for all records updated since last check
+  const char* params[1] = { m_last_check_time.c_str() };
+  
+  PGresult* result = PQexecParams(m_conn,
+                                  "SELECT section, tag, value, updated_at FROM config "
+                                  "WHERE updated_at > $1 ORDER BY updated_at",
+                                  1,      // number of parameters
+                                  nullptr, // parameter types (NULL = infer)
+                                  params, // parameter values
+                                  nullptr, // parameter lengths (NULL = strings)
+                                  nullptr, // parameter formats (NULL = text)
+                                  0);     // result format (0 = text)
+
+  if (PQresultStatus(result) != PGRES_TUPLES_OK)
+  {
+    cerr << "*** ERROR: Failed to execute change detection query: " << PQerrorMessage(m_conn) << endl;
+    PQclear(result);
+    return false;
+  }
+
+  bool changes_detected = false;
+  std::string latest_timestamp = m_last_check_time;
+  int rows = PQntuples(result);
+
+  for (int i = 0; i < rows; i++)
+  {
+    const char* section = PQgetvalue(result, i, 0);
+    const char* tag = PQgetvalue(result, i, 1);
+    const char* value = PQgetvalue(result, i, 2);
+    const char* updated_at = PQgetvalue(result, i, 3);
+
+    if (section && tag && value && updated_at)
+    {
+      valueChanged(std::string(section), std::string(tag), std::string(value));
+      latest_timestamp = std::string(updated_at);
+      changes_detected = true;
+    }
+  }
+
+  PQclear(result);
+
+  // Update last check time to the latest timestamp seen
+  if (changes_detected)
+  {
+    m_last_check_time = latest_timestamp;
+  }
+
+  return changes_detected;
+} /* PostgreSQLConfigBackend::checkForExternalChanges */
 
 /****************************************************************************
  *

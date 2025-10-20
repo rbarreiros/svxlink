@@ -550,19 +550,37 @@ int main(int argc, const char *argv[])
   }
   else
   {
-    // Positional argument specified or no config specified, use legacy file backend
+    // Positional argument specified or no config specified
     if (!cfgfile.empty())
     {
-      cout << "Using file backend with config file: " << cfgfile << endl;
-      if (!cfg.openDirect("file://" + cfgfile))
+      // Auto-detect if this is a db.conf file or regular config file
+      bool is_dbconf = (cfgfile.find("db.conf") != string::npos);
+      
+      bool config_loaded = false;
+      if (is_dbconf)
       {
-        cerr << "*** ERROR: Could not open configuration file \"" << cfgfile << "\".\n";
+        cout << "Detected db.conf file, loading database configuration..." << endl;
+        config_loaded = cfg.openFromDbConfig(cfgfile);
+      }
+      else
+      {
+        cout << "Loading file-based configuration..." << endl;
+        config_loaded = cfg.openDirect("file://" + cfgfile);
+      }
+      
+      if (!config_loaded)
+      {
+        cerr << "*** ERROR: Could not open configuration from \"" << cfgfile << "\".\n";
         exit(1);
       }
+      
+      cout << "Configuration loaded from " << cfgfile 
+           << " using " << cfg.getBackendType() << " backend" << endl;
     }
     else
     {
-      cerr << "*** ERROR: No configuration file specified. Use --config, --dbconfig, or provide config file as argument.\n";
+      cerr << "*** ERROR: No configuration file specified.\n";
+      cerr << "Usage: Use --config <file>, --dbconfig <db.conf>, or provide config file/db.conf as argument.\n";
       exit(1);
     }
   }

@@ -176,6 +176,10 @@ class ConfigManager
     {
       std::string type;
       std::string source;
+      bool enable_change_notifications;
+      unsigned int poll_interval_seconds;
+      
+      DbConfig() : enable_change_notifications(false), poll_interval_seconds(0) {}
     };
 
     bool findAndParseDbConfig(const std::string& config_dir, DbConfig& config, std::string& db_conf_path);

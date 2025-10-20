@@ -275,55 +275,19 @@ int main(int argc, char **argv)
   }
   
   Config cfg;
-  string cfg_filename;
-  
-  // Configuration backend selection logic according to requirements:
-  // 1. If --config is specified, use file backend with that file
-  // 2. If --dbconfig is specified, use database backend with that db config file
-  // 3. If no arguments, search for db.conf in usual places, if found use database backend
-  // 4. If no db.conf found, fall back to file backend with svxlink.conf in usual places
-  // 5. If neither found, complain and exit
-  
-  if (config != NULL)
+  auto result = cfg.openWithFallback(config ? string(config) : "",
+                                      dbconfig ? string(dbconfig) : "",
+                                      "svxlink.conf");
+  if (!result.success)
   {
-    // Case 1: --config specified, use file backend
-    cfg_filename = string(config);
-    cout << "Using file backend with config file: " << cfg_filename << endl;
-    if (!cfg.openDirect("file://" + cfg_filename))
-    {
-      cerr << "*** ERROR: Could not open configuration file: " << config << endl;
-      exit(1);
-    }
+    cerr << "*** ERROR: " << result.error_message << endl;
+    exit(1);
   }
-  else if (dbconfig != NULL)
-  {
-    // Case 2: --dbconfig specified, use database backend with that db config file
-    string db_config_path = string(dbconfig);
-    cout << "Using database backend with db config file: " << db_config_path << endl;
-    
-    if (!cfg.openFromDbConfig(db_config_path))
-    {
-      cerr << "*** ERROR: Could not initialize database configuration system with: " 
-           << db_config_path << endl;
-      exit(1);
-    }
-    cfg_filename = cfg.getMainConfigFile(); // Get the reference file for CFG_DIR resolution
-  }
-  else
-  {
-    // Case 3 & 4: No arguments specified, search for db.conf first, then svxlink.conf
-    cout << "No configuration arguments specified, searching in standard locations..." << endl;
-    if (!cfg.open())
-    {
-      cerr << "*** ERROR: Could not initialize configuration system" << endl;
-      cerr << "*** Please ensure either db.conf or svxlink.conf exists in standard locations:" << endl;
-      cerr << "***   ~/.svxlink/" << endl;
-      cerr << "***   /etc/svxlink/" << endl;
-      exit(1);
-    }
-    cfg_filename = cfg.getMainConfigFile(); // Get the reference file for CFG_DIR resolution
-  }
+
+  cout << "Configuration loaded from: " << result.source_path 
+       << " (" << result.backend_type << " backend)" << endl;
   
+  string cfg_filename = result.source_path;
   string main_cfg_filename(cfg_filename);
   
   // CFG_DIR processing: Only applies to file backend

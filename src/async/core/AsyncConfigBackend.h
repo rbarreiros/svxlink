@@ -40,12 +40,16 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <map>
 #include <list>
 #include <memory>
+#include <ctime>
+#include <sigc++/sigc++.h>
 
 /****************************************************************************
  *
  * Project Includes
  *
  ****************************************************************************/
+
+#include <AsyncFactory.h>
 
 /****************************************************************************
  *
@@ -58,6 +62,11 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  * Forward declarations
  *
  ****************************************************************************/
+
+namespace Async
+{
+  class Timer;
+}
 
 /****************************************************************************
  *
@@ -101,18 +110,24 @@ This is an abstract base class that defines the interface for configuration
 backends. Different implementations can load configuration data from various
 sources such as INI files, MySQL, PostgreSQL, SQLite databases, etc.
 */
-class ConfigBackend
+class ConfigBackend : public sigc::trackable
 {
   public:
     /**
-     * @brief 	Default constructor
+     * @brief   Constructor with notification settings
+     * @param   enable_notifications  Enable change notifications (default: false)
+     * @param   auto_poll_interval_ms Auto-polling interval in milliseconds (0 = disabled)
+     *
+     * If enable_notifications is true and auto_poll_interval_ms > 0, auto-polling
+     * will start immediately.
      */
-    ConfigBackend(void) {}
+    ConfigBackend(bool enable_notifications = false,
+                  unsigned int auto_poll_interval_ms = 0);
   
     /**
      * @brief 	Destructor
      */
-    virtual ~ConfigBackend(void) {}
+    virtual ~ConfigBackend(void);
   
     /**
      * @brief 	Open/connect to the configuration source
@@ -192,9 +207,82 @@ class ConfigBackend
      */
     virtual std::string getBackendInfo(void) const = 0;
 
+    /**
+     * @brief   Enable or disable change notifications
+     * @param   enable true to enable, false to disable
+     */
+    void enableChangeNotifications(bool enable);
+
+    /**
+     * @brief   Check if change notifications are enabled
+     * @return  true if enabled, false otherwise
+     */
+    bool changeNotificationsEnabled(void) const;
+
+    /**
+     * @brief   Check for external changes (e.g., direct database updates)
+     * @return  true if changes were detected, false otherwise
+     *
+     * This method is called by the auto-polling timer (if enabled) or can be
+     * called manually. Database backends override this to check for changes.
+     */
+    virtual bool checkForExternalChanges(void);
+
+    /**
+     * @brief   Start automatic polling for external changes
+     * @param   interval_ms Polling interval in milliseconds
+     *
+     * Starts a timer that periodically calls checkForExternalChanges().
+     * Stops any existing polling timer first.
+     */
+    void startAutoPolling(unsigned int interval_ms);
+
+    /**
+     * @brief   Stop automatic polling
+     */
+    void stopAutoPolling(void);
+
+    /**
+     * @brief   Check if auto-polling is active
+     * @return  true if polling is active, false otherwise
+     */
+    bool isAutoPolling(void) const;
+
+    /**
+     * @brief   Signal emitted when a configuration value changes
+     * @param   section The section name
+     * @param   tag The configuration tag name
+     * @param   value The new value
+     *
+     * This signal is emitted when setValue() is called or when external
+     * changes are detected (for database backends).
+     */
+    sigc::signal<void(const std::string&, const std::string&, const std::string&)> valueChanged;
+
   protected:
+    /**
+     * @brief   Notify listeners of a value change
+     * @param   section The section name
+     * @param   tag The configuration tag name
+     * @param   value The new value
+     *
+     * Call this method from setValue() implementations to emit the valueChanged signal.
+     * Respects the m_enable_change_notifications flag.
+     */
+    void notifyValueChanged(const std::string& section,
+                           const std::string& tag,
+                           const std::string& value);
 
   private:
+    /**
+     * @brief   Timer callback for auto-polling
+     * @param   timer The timer that expired
+     */
+    void onPollTimer(Async::Timer* timer);
+
+    bool m_enable_change_notifications;  ///< Whether notifications are enabled
+    unsigned int m_default_poll_interval; ///< Default polling interval (ms)
+    Async::Timer* m_poll_timer;           ///< Auto-polling timer
     // Disable copy constructor and assignment operator
     ConfigBackend(const ConfigBackend&) = delete;
     ConfigBackend& operator=(const ConfigBackend&) = delete;
@@ -205,6 +293,68 @@ class ConfigBackend
  * @brief Smart pointer type for ConfigBackend
  */
 using ConfigBackendPtr = std::unique_ptr<ConfigBackend>;
+
+/****************************************************************************
+ *
+ * Factory Pattern Support
+ *
+ ****************************************************************************/
+
+/**
+ * @brief Factory for creating ConfigBackend instances
+ *
+ * Example registration:
+ * @code
+ * static ConfigBackendSpecificFactory<MySQLConfigBackend> mysql_factory("mysql");
+ * @endcode
+ */
+using ConfigBackendFactory = Factory<ConfigBackend>;
+
+/**
+ * @brief Specific factory for a ConfigBackend implementation
+ * @tparam T The concrete backend class (must inherit from ConfigBackend)
+ *
+ * Automatically registers the backend with the factory.
+ */
+template<class T>
+using ConfigBackendSpecificFactory = SpecificFactory<ConfigBackend, T>;
+
+/****************************************************************************
+ *
+ * Convenience Functions
+ *
+ ****************************************************************************/
+
+/**
+ * @brief Create a ConfigBackend from a URL
+ * @param url Configuration source URL (e.g., "mysql://user:pass@host/db")
+ * @return ConfigBackendPtr on success, nullptr on failure
+ *
+ * Parses the URL, detects the backend type, and creates the appropriate backend.
+ *
+ * Example:
+ * @code
+ * auto backend = Async::createConfigBackend("sqlite:///var/lib/svxlink/db.sqlite");
+ * if (backend && backend->open(...)) {
+ *   // Use backend
+ * }
+ * @endcode
+ */
+ConfigBackendPtr createConfigBackend(const std::string& url);
+
+/**
+ * @brief Create a ConfigBackend by explicit type
+ * @param backend_type Backend type name (e.g., "mysql", "sqlite")
+ * @param connection_info Connection information (file path or connection string)
+ * @return ConfigBackendPtr on success, nullptr on failure
+ *
+ * Example:
+ * @code
+ * auto backend = Async::createConfigBackendByType("mysql", "host,3306,db,user,pass");
+ * @endcode
+ */
+ConfigBackendPtr createConfigBackendByType(const std::string& backend_type,
+                                          const std::string& connection_info);
 
 } /* namespace */
 

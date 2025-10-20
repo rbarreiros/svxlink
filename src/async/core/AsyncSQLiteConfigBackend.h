@@ -201,11 +201,21 @@ class SQLiteConfigBackend : public ConfigBackend
      */
     virtual std::string getBackendInfo(void) const override;
 
+    /**
+     * @brief   Check for external changes to the database
+     * @return  true if changes were detected, false otherwise
+     *
+     * This method queries the database for any records that have been modified
+     * since the last check and emits valueChanged signals for each change.
+     */
+    virtual bool checkForExternalChanges(void) override;
+
   protected:
 
   private:
     sqlite3*    m_db;
     std::string m_db_path;
+    std::string m_last_check_time;
 
     bool createTables(void);
     bool executeSQL(const std::string& sql) const;

@@ -71,6 +71,11 @@ using namespace Async;
  *
  ****************************************************************************/
 
+#ifdef HAS_MYSQL_SUPPORT
+// Factory registration for MySQL backend
+static ConfigBackendSpecificFactory<MySQLConfigBackend> mysql_factory("mysql");
+#endif
+
 /****************************************************************************
  *
  * Prototypes
@@ -96,7 +101,7 @@ using namespace Async;
  ****************************************************************************/
 
 MySQLConfigBackend::MySQLConfigBackend(void)
-  : m_mysql(nullptr)
+  : ConfigBackend(true, 300000), m_mysql(nullptr), m_last_check_time("1970-01-01 00:00:00")
 {
   m_conn_params.port = 3306; // Default MySQL port
 } /* MySQLConfigBackend::MySQLConfigBackend */
@@ -236,6 +241,7 @@ bool MySQLConfigBackend::setValue(const std::string& section, const std::string&
     return false;
   }
   
+  notifyValueChanged(section, tag, value);
   return true;
 } /* MySQLConfigBackend::setValue */
 
@@ -337,6 +343,58 @@ std::string MySQLConfigBackend::getBackendInfo(void) const
   
   return info.str();
 } /* MySQLConfigBackend::getBackendInfo */
+
+bool MySQLConfigBackend::checkForExternalChanges(void)
+{
+  if (!isOpen())
+  {
+    return false;
+  }
+
+  // Query for all records updated since last check
+  string escaped_last_check = escapeString(m_last_check_time);
+  ostringstream query;
+  query << "SELECT section, tag, value, updated_at FROM config "
+        << "WHERE updated_at > '" << escaped_last_check << "' "
+        << "ORDER BY updated_at";
+
+  if (mysql_query(m_mysql, query.str().c_str()) != 0)
+  {
+    cerr << "*** ERROR: Failed to execute change detection query: " << getLastError() << endl;
+    return false;
+  }
+
+  MYSQL_RES* result = mysql_store_result(m_mysql);
+  if (!result)
+  {
+    cerr << "*** ERROR: Failed to store result: " << getLastError() << endl;
+    return false;
+  }
+
+  bool changes_detected = false;
+  std::string latest_timestamp = m_last_check_time;
+  MYSQL_ROW row;
+
+  while ((row = mysql_fetch_row(result)))
+  {
+    if (row[0] && row[1] && row[2] && row[3])
+    {
+      valueChanged(std::string(row[0]), std::string(row[1]), std::string(row[2]));
+      latest_timestamp = std::string(row[3]);
+      changes_detected = true;
+    }
+  }
+
+  mysql_free_result(result);
+
+  // Update last check time to the latest timestamp seen
+  if (changes_detected)
+  {
+    m_last_check_time = latest_timestamp;
+  }
+
+  return changes_detected;
+} /* MySQLConfigBackend::checkForExternalChanges */
 
 /****************************************************************************
  *

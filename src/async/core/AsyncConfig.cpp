@@ -41,10 +41,12 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <unistd.h>
 #include <errno.h>
 #include <ctype.h>
+#include <sys/stat.h>
 
 #include <iostream>
 #include <cassert>
 #include <cstring>
+#include <vector>
 
 
 /****************************************************************************
@@ -62,7 +64,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  ****************************************************************************/
 
 #include "AsyncConfig.h"
-#include "AsyncConfigFactory.h"
+#include "AsyncConfigBackend.h"
 #include "AsyncConfigManager.h"
 
 
@@ -75,6 +77,17 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 using namespace std;
 using namespace Async;
+
+
+/****************************************************************************
+ *
+ * Defines & typedefs
+ *
+ ****************************************************************************/
+
+#ifndef SVX_SYSCONF_INSTALL_DIR
+#define SVX_SYSCONF_INSTALL_DIR "/etc"
+#endif
 
 
 /****************************************************************************
@@ -151,6 +164,9 @@ bool Config::open(const string& config_dir)
   // Load all configuration data into memory for subscription support
   loadFromBackend();
 
+  // Connect backend signals for external change detection
+  connectBackendSignals();
+
   return true;
 } /* Config::open */
 
@@ -173,13 +189,16 @@ bool Config::openFromDbConfig(const string& db_conf_path)
   // Load all configuration data into memory for subscription support
   loadFromBackend();
 
+  // Connect backend signals for external change detection
+  connectBackendSignals();
+
   return true;
 } /* Config::openFromDbConfig */
 
 bool Config::openDirect(const string& source)
 {
-  // Create the appropriate backend using the factory (legacy method)
-  m_backend = ConfigFactory::createBackend(source);
+  // Create the appropriate backend using the factory
+  m_backend = createConfigBackend(source);
   if (m_backend == nullptr)
   {
     cerr << "*** ERROR: Failed to create configuration backend for: " << source << endl;
@@ -201,6 +220,9 @@ bool Config::openDirect(const string& source)
 
   // Load all configuration data into memory for subscription support
   loadFromBackend();
+
+  // Connect backend signals for external change detection
+  connectBackendSignals();
 
   return true;
 } /* Config::openDirect */
@@ -422,6 +444,209 @@ void Config::syncToBackend(const std::string& section, const std::string& tag)
     }
   }
 } /* Config::syncToBackend */
+
+ConfigBackend* Config::getBackend(void)
+{
+  return m_backend.get();
+} /* Config::getBackend */
+
+void Config::reload(void)
+{
+  if (m_backend == nullptr || !m_backend->isOpen())
+  {
+    return;
+  }
+
+  // For database backends, check for external changes first
+  if (m_backend->getBackendType() != "file")
+  {
+    m_backend->checkForExternalChanges();
+  }
+
+  // Reload all sections and tags
+  auto sections = m_backend->listSections();
+  for (const auto& section : sections)
+  {
+    auto tags = m_backend->listSection(section);
+    for (const auto& tag : tags)
+    {
+      std::string new_value;
+      if (m_backend->getValue(section, tag, new_value))
+      {
+        // Check if value changed
+        auto sec_it = m_sections.find(section);
+        if (sec_it != m_sections.end())
+        {
+          auto val_it = sec_it->second.find(tag);
+          if (val_it != sec_it->second.end())
+          {
+            if (val_it->second.val != new_value)
+            {
+              // Value changed, update cache and trigger subscriptions
+              std::string old_value = val_it->second.val;
+              val_it->second.val = new_value;
+              
+              // Notify all subscribers
+              for (auto& sub : val_it->second.subs)
+              {
+                sub(new_value);
+              }
+              
+              // Emit valueUpdated signal
+              valueUpdated(section + "/" + tag, new_value);
+            }
+          }
+        }
+      }
+    }
+  }
+} /* Config::reload */
+
+void Config::onBackendValueChanged(const std::string& section,
+                                    const std::string& tag,
+                                    const std::string& value)
+{
+  // Update in-memory cache
+  m_sections[section][tag].val = value;
+
+  // Trigger subscriptions
+  auto sec_it = m_sections.find(section);
+  if (sec_it != m_sections.end())
+  {
+    auto val_it = sec_it->second.find(tag);
+    if (val_it != sec_it->second.end())
+    {
+      for (auto& sub : val_it->second.subs)
+      {
+        sub(value);
+      }
+    }
+  }
+
+  // Emit valueUpdated signal
+  valueUpdated(section + "/" + tag, value);
+} /* Config::onBackendValueChanged */
+
+void Config::connectBackendSignals(void)
+{
+  if (m_backend != nullptr)
+  {
+    m_backend->valueChanged.connect(
+        sigc::mem_fun(*this, &Config::onBackendValueChanged));
+  }
+} /* Config::connectBackendSignals */
+
+Config::ConfigLoadResult Config::openWithFallback(const std::string& cmdline_config,
+                                                   const std::string& cmdline_dbconfig,
+                                                   const std::string& default_config_name)
+{
+  ConfigLoadResult result;
+  result.success = false;
+  result.used_dbconfig = false;
+
+  // Priority 1: --config option
+  if (!cmdline_config.empty())
+  {
+    if (openDirect("file://" + cmdline_config))
+    {
+      result.success = true;
+      result.source_type = "command_line";
+      result.source_path = cmdline_config;
+      result.backend_type = getBackendType();
+      result.used_dbconfig = false;
+      return result;
+    }
+    else
+    {
+      result.error_message = "Failed to open configuration file: " + cmdline_config;
+      return result;
+    }
+  }
+
+  // Priority 2: --dbconfig option
+  if (!cmdline_dbconfig.empty())
+  {
+    if (openFromDbConfig(cmdline_dbconfig))
+    {
+      result.success = true;
+      result.source_type = "command_line";
+      result.source_path = cmdline_dbconfig;
+      result.backend_type = getBackendType();
+      result.used_dbconfig = true;
+      return result;
+    }
+    else
+    {
+      result.error_message = "Failed to open database configuration: " + cmdline_dbconfig;
+      return result;
+    }
+  }
+
+  // Priority 3: Search for db.conf in standard locations
+  std::vector<std::string> search_paths = {
+    std::string(getenv("HOME") ? getenv("HOME") : "") + "/.svxlink/db.conf",
+    "/etc/svxlink/db.conf",
+    std::string(SVX_SYSCONF_INSTALL_DIR) + "/db.conf"
+  };
+
+  for (const auto& db_conf_path : search_paths)
+  {
+    struct stat st;
+    if (stat(db_conf_path.c_str(), &st) == 0)
+    {
+      if (openFromDbConfig(db_conf_path))
+      {
+        result.success = true;
+        result.source_type = "dbconfig";
+        result.source_path = db_conf_path;
+        result.backend_type = getBackendType();
+        result.used_dbconfig = true;
+        return result;
+      }
+      else
+      {
+        result.error_message = "Found db.conf at " + db_conf_path + " but failed to load it";
+        return result;
+      }
+    }
+  }
+
+  // Priority 4: Search for default config file in standard locations
+  std::vector<std::string> config_search_paths = {
+    std::string(getenv("HOME") ? getenv("HOME") : "") + "/.svxlink/" + default_config_name,
+    "/etc/svxlink/" + default_config_name,
+    std::string(SVX_SYSCONF_INSTALL_DIR) + "/" + default_config_name
+  };
+
+  for (const auto& config_path : config_search_paths)
+  {
+    struct stat st;
+    if (stat(config_path.c_str(), &st) == 0)
+    {
+      if (openDirect("file://" + config_path))
+      {
+        result.success = true;
+        result.source_type = "default";
+        result.source_path = config_path;
+        result.backend_type = getBackendType();
+        result.used_dbconfig = false;
+        return result;
+      }
+      else
+      {
+        result.error_message = "Found configuration at " + config_path + " but failed to load it";
+        return result;
+      }
+    }
+  }
+
+  // Nothing found
+  result.source_type = "none";
+  result.error_message = "No configuration found. Searched for:\n";
+  result.error_message += "  - db.conf in: ~/.svxlink/, /etc/svxlink/, " + std::string(SVX_SYSCONF_INSTALL_DIR) + "\n";
+  result.error_message += "  - " + default_config_name + " in: ~/.svxlink/, /etc/svxlink/, " + std::string(SVX_SYSCONF_INSTALL_DIR);
+  return result;
+} /* Config::openWithFallback */
 
 
 /*
