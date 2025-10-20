@@ -16,6 +16,7 @@ namespace Async
 ConfigBackend::ConfigBackend(bool enable_notifications, unsigned int auto_poll_interval_ms)
   : m_enable_change_notifications(enable_notifications),
     m_default_poll_interval(auto_poll_interval_ms),
+    m_current_poll_interval(0),
     m_poll_timer(nullptr)
 {
   // Auto-start polling if notifications are enabled and interval > 0
@@ -55,8 +56,11 @@ void ConfigBackend::startAutoPolling(unsigned int interval_ms)
     return;
   }
 
-  stopAutoPolling();
-  m_poll_timer = new Async::Timer(interval_ms);
+  std::cout << "Starting auto-polling with interval: " << interval_ms << " milliseconds" << std::endl;
+
+  m_current_poll_interval = interval_ms;
+  //stopAutoPolling();
+  m_poll_timer = new Async::Timer(interval_ms, Async::Timer::TYPE_PERIODIC, true);
   m_poll_timer->expired.connect(sigc::mem_fun(*this, &ConfigBackend::onPollTimer));
   m_poll_timer->setEnable(true);
 }
@@ -65,8 +69,10 @@ void ConfigBackend::stopAutoPolling(void)
 {
   if (m_poll_timer != nullptr)
   {
+    std::cout << "Stopping auto-polling" << std::endl;
     delete m_poll_timer;
     m_poll_timer = nullptr;
+    m_current_poll_interval = 0;
   }
 }
 
@@ -75,8 +81,14 @@ bool ConfigBackend::isAutoPolling(void) const
   return (m_poll_timer != nullptr);
 }
 
+unsigned int ConfigBackend::getPollingInterval(void) const
+{
+  return m_current_poll_interval;
+}
+
 void ConfigBackend::onPollTimer(Async::Timer* timer)
 {
+  //std::cout << "Checking for external changes" << " -- next check in " << timer->timeout() << " milliseconds" << std::endl;
   checkForExternalChanges();
 }
 
@@ -86,6 +98,7 @@ void ConfigBackend::notifyValueChanged(const std::string& section,
 {
   if (m_enable_change_notifications)
   {
+    std::cout << "Configuration changed: [" << section << "]/" << tag << " = " << value << std::endl;
     valueChanged(section, tag, value);
   }
 }

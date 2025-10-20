@@ -109,7 +109,10 @@ std::string ConfigSource::getBackendTypeName(BackendType type)
 bool ConfigSource::parseDatabaseURL(const std::string& url,
                                     std::string& connection_string)
 {
-  // Expected format: scheme://[user:pass@]host[:port]/database
+  // Expected formats:
+  //   SQLite:     sqlite:///path/to/file.db
+  //   MySQL:      mysql://[user:pass@]host[:port]/database
+  //   PostgreSQL: postgresql://[user:pass@]host[:port]/database
   
   size_t scheme_end = url.find("://");
   if (scheme_end == std::string::npos)
@@ -117,7 +120,15 @@ bool ConfigSource::parseDatabaseURL(const std::string& url,
     return false;
   }
 
+  std::string scheme = url.substr(0, scheme_end);
   std::string remainder = url.substr(scheme_end + 3);
+  
+  // Special case for SQLite - it's just a file path
+  if (scheme == "sqlite")
+  {
+    connection_string = remainder;
+    return true;
+  }
   
   // Parse user:pass@ if present
   std::string user, pass, host, database;

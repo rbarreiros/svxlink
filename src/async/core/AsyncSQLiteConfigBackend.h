@@ -220,6 +220,7 @@ class SQLiteConfigBackend : public ConfigBackend
     bool createTables(void);
     bool executeSQL(const std::string& sql) const;
     std::string getLastError(void) const;
+    void initializeLastCheckTime(void);
 
 }; /* class SQLiteConfigBackend */
 

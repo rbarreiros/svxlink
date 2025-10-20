@@ -352,7 +352,7 @@ bool PostgreSQLConfigBackend::checkForExternalChanges(void)
 
     if (section && tag && value && updated_at)
     {
-      valueChanged(std::string(section), std::string(tag), std::string(value));
+      notifyValueChanged(std::string(section), std::string(tag), std::string(value));
       latest_timestamp = std::string(updated_at);
       changes_detected = true;
     }

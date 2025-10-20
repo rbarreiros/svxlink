@@ -161,8 +161,21 @@ bool Config::open(const string& config_dir)
   // - For database backend: use the db.conf location
   m_main_config_file = manager.getMainConfigReference();
 
+  // Disable notifications during initial config load to avoid spurious signals
+  bool was_enabled = m_backend->changeNotificationsEnabled();
+  if (was_enabled)
+  {
+    m_backend->enableChangeNotifications(false);
+  }
+
   // Load all configuration data into memory for subscription support
   loadFromBackend();
+
+  // Re-enable notifications before connecting signals
+  if (was_enabled)
+  {
+    m_backend->enableChangeNotifications(true);
+  }
 
   // Connect backend signals for external change detection
   connectBackendSignals();
@@ -186,8 +199,21 @@ bool Config::openFromDbConfig(const string& db_conf_path)
   // For CFG_DIR resolution, use the db.conf location as reference
   m_main_config_file = manager.getMainConfigReference();
 
+  // Disable notifications during initial config load to avoid spurious signals
+  bool was_enabled = m_backend->changeNotificationsEnabled();
+  if (was_enabled)
+  {
+    m_backend->enableChangeNotifications(false);
+  }
+
   // Load all configuration data into memory for subscription support
   loadFromBackend();
+
+  // Re-enable notifications before connecting signals
+  if (was_enabled)
+  {
+    m_backend->enableChangeNotifications(true);
+  }
 
   // Connect backend signals for external change detection
   connectBackendSignals();
@@ -218,8 +244,21 @@ bool Config::openDirect(const string& source)
   cout << "Using " << m_backend->getBackendType() << " configuration backend: " 
        << m_backend->getBackendInfo() << endl;
 
+  // Disable notifications during initial config load to avoid spurious signals
+  bool was_enabled = m_backend->changeNotificationsEnabled();
+  if (was_enabled)
+  {
+    m_backend->enableChangeNotifications(false);
+  }
+
   // Load all configuration data into memory for subscription support
   loadFromBackend();
+
+  // Re-enable notifications before connecting signals
+  if (was_enabled)
+  {
+    m_backend->enableChangeNotifications(true);
+  }
 
   // Connect backend signals for external change detection
   connectBackendSignals();
@@ -506,6 +545,9 @@ void Config::onBackendValueChanged(const std::string& section,
                                     const std::string& tag,
                                     const std::string& value)
 {
+  //std::cout << "[DEBUG Config] onBackendValueChanged called: [" << section << "]" << tag 
+  //          << " = '" << value << "'" << std::endl;
+
   // Update in-memory cache
   m_sections[section][tag].val = value;
 
@@ -516,11 +558,22 @@ void Config::onBackendValueChanged(const std::string& section,
     auto val_it = sec_it->second.find(tag);
     if (val_it != sec_it->second.end())
     {
+      //std::cout << "[DEBUG Config] Found " << val_it->second.subs.size() 
+      //          << " subscription(s) for [" << section << "]" << tag << std::endl;
       for (auto& sub : val_it->second.subs)
       {
+        //std::cout << "[DEBUG Config] Triggering subscription callback" << std::endl;
         sub(value);
       }
     }
+    else
+    {
+      //std::cout << "[DEBUG Config] Tag not found in cache: [" << section << "]" << tag << std::endl;
+    }
+  }
+  else
+  {
+    //std::cout << "[DEBUG Config] Section not found in cache: [" << section << "]" << std::endl;
   }
 
   // Emit valueUpdated signal

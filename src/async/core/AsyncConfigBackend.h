@@ -249,6 +249,12 @@ class ConfigBackend : public sigc::trackable
     bool isAutoPolling(void) const;
 
     /**
+     * @brief   Get the current polling interval
+     * @return  The polling interval in milliseconds, or 0 if not polling
+     */
+    unsigned int getPollingInterval(void) const;
+
+    /**
      * @brief   Signal emitted when a configuration value changes
      * @param   section The section name
      * @param   tag The configuration tag name
@@ -282,6 +288,7 @@ class ConfigBackend : public sigc::trackable
 
     bool m_enable_change_notifications;  ///< Whether notifications are enabled
     unsigned int m_default_poll_interval; ///< Default polling interval (ms)
+    unsigned int m_current_poll_interval; ///< Current polling interval (ms), 0 if not polling
     Async::Timer* m_poll_timer;           ///< Auto-polling timer
     // Disable copy constructor and assignment operator
     ConfigBackend(const ConfigBackend&) = delete;

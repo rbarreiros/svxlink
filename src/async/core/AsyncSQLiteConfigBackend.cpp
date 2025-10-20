@@ -141,6 +141,10 @@ bool SQLiteConfigBackend::open(const string& source)
     return false;
   }
   
+  // Initialize m_last_check_time to the most recent updated_at in the database
+  // This prevents detecting all existing records as "changes" on first poll
+  initializeLastCheckTime();
+  
   return true;
 } /* SQLiteConfigBackend::open */
 
@@ -355,6 +359,15 @@ bool SQLiteConfigBackend::checkForExternalChanges(void)
 
   sqlite3_bind_text(stmt, 1, m_last_check_time.c_str(), -1, SQLITE_STATIC);
 
+  // Debug output
+  char* expanded_sql = sqlite3_expanded_sql(stmt);
+  if (expanded_sql != nullptr)
+  {
+    //std::cout << "[DEBUG] Change detection SQL: " << expanded_sql << std::endl;
+    sqlite3_free(expanded_sql);
+  }
+  //std::cout << "[DEBUG] Last check time: " << m_last_check_time << std::endl;
+
   bool changes_detected = false;
   std::string latest_timestamp = m_last_check_time;
 
@@ -367,7 +380,9 @@ bool SQLiteConfigBackend::checkForExternalChanges(void)
 
     if (section && tag && value && updated_at)
     {
-      valueChanged(std::string(section), std::string(tag), std::string(value));
+      //std::cout << "[DEBUG] Change detected: [" << section << "]" << tag 
+      //          << " = '" << value << "' (updated_at: " << updated_at << ")" << std::endl;
+      notifyValueChanged(std::string(section), std::string(tag), std::string(value));
       latest_timestamp = std::string(updated_at);
       changes_detected = true;
     }
@@ -378,7 +393,13 @@ bool SQLiteConfigBackend::checkForExternalChanges(void)
   // Update last check time to the latest timestamp seen
   if (changes_detected)
   {
+    //std::cout << "[DEBUG] Updated last_check_time: " << m_last_check_time 
+    //          << " -> " << latest_timestamp << std::endl;
     m_last_check_time = latest_timestamp;
+  }
+  else
+  {
+    //std::cout << "[DEBUG] No external changes detected" << std::endl;
   }
 
   return changes_detected;
@@ -425,6 +446,21 @@ bool SQLiteConfigBackend::createTables(void)
     return false;
   }
   
+  // Create trigger to automatically update updated_at on any UPDATE
+  const char* create_trigger = 
+    "CREATE TRIGGER IF NOT EXISTS update_config_timestamp "
+    "AFTER UPDATE ON config "
+    "FOR EACH ROW "
+    "BEGIN "
+    "  UPDATE config SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id; "
+    "END";
+  
+  if (!executeSQL(create_trigger))
+  {
+    cerr << "*** ERROR: Failed to create update trigger" << endl;
+    return false;
+  }
+  
   return true;
 } /* SQLiteConfigBackend::createTables */
 
@@ -456,6 +492,50 @@ std::string SQLiteConfigBackend::getLastError(void) const
   }
   return "Database not open";
 } /* SQLiteConfigBackend::getLastError */
+
+void SQLiteConfigBackend::initializeLastCheckTime(void)
+{
+  if (!isOpen())
+  {
+    return;
+  }
+
+  // Query for the most recent updated_at timestamp in the database
+  const char* sql = "SELECT MAX(updated_at) FROM config";
+  sqlite3_stmt* stmt;
+
+  int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
+  if (rc != SQLITE_OK)
+  {
+    std::cerr << "*** WARNING: Failed to query max updated_at: " << getLastError() << std::endl;
+    return;
+  }
+
+  rc = sqlite3_step(stmt);
+  if (rc == SQLITE_ROW)
+  {
+    const char* max_timestamp = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
+    if (max_timestamp != nullptr)
+    {
+      m_last_check_time = std::string(max_timestamp);
+      //std::cout << "[DEBUG] Initialized last_check_time to: " << m_last_check_time << std::endl;
+    }
+    else
+    {
+      // Database is empty or all updated_at are NULL
+      m_last_check_time = "1970-01-01 00:00:00";
+      //std::cout << "[DEBUG] Database empty, initialized last_check_time to epoch" << std::endl;
+    }
+  }
+  else
+  {
+    // Query failed, use default
+    m_last_check_time = "1970-01-01 00:00:00";
+    //std::cout << "[DEBUG] Query failed, initialized last_check_time to epoch" << std::endl;
+  }
+
+  sqlite3_finalize(stmt);
+} /* SQLiteConfigBackend::initializeLastCheckTime */
 
 /*
  * This file has not been truncated

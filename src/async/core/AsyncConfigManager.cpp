@@ -417,6 +417,21 @@ bool ConfigManager::initializeDatabase(ConfigBackend* backend)
   
   cout << "Database is empty, initializing..." << endl;
   
+  // Disable change notifications during initialization to avoid spurious signals
+  bool was_enabled = backend->changeNotificationsEnabled();
+  bool was_polling = backend->isAutoPolling();
+  unsigned int poll_interval_ms = backend->getPollingInterval();
+  if (was_enabled)
+  {
+    //cout << "[DEBUG] Disabling change notifications during database initialization" << endl;
+    backend->enableChangeNotifications(false);
+  }
+  if (was_polling)
+  {
+    //cout << "[DEBUG] Stopping auto-polling during database initialization (was " << poll_interval_ms << "ms)" << endl;
+    backend->stopAutoPolling();
+  }
+  
   // Try to populate from existing file configuration first
   if (populateFromExistingFiles(backend))
   {
@@ -426,6 +441,18 @@ bool ConfigManager::initializeDatabase(ConfigBackend* backend)
   {
     cout << "No existing configuration files found, using default configuration..." << endl;
     populateDefaultConfiguration(backend);
+  }
+  
+  // Re-enable change notifications and polling if they were enabled before
+  if (was_enabled)
+  {
+    //cout << "[DEBUG] Re-enabling change notifications after database initialization" << endl;
+    backend->enableChangeNotifications(true);
+  }
+  if (was_polling && poll_interval_ms > 0)
+  {
+    //cout << "[DEBUG] Restarting auto-polling after database initialization (" << poll_interval_ms << "ms)" << endl;
+    backend->startAutoPolling(poll_interval_ms);
   }
   
   // Verify initialization

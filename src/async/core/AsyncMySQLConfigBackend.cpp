@@ -379,7 +379,7 @@ bool MySQLConfigBackend::checkForExternalChanges(void)
   {
     if (row[0] && row[1] && row[2] && row[3])
     {
-      valueChanged(std::string(row[0]), std::string(row[1]), std::string(row[2]));
+      notifyValueChanged(std::string(row[0]), std::string(row[1]), std::string(row[2]));
       latest_timestamp = std::string(row[3]);
       changes_detected = true;
     }
