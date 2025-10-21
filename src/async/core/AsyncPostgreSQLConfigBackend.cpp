@@ -1,7 +1,7 @@
 /**
 @file	 AsyncPostgreSQLConfigBackend.cpp
 @brief   PostgreSQL-based configuration backend implementation
-@author  Assistant
+@author  Rui Barreiros
 @date	 2025-09-19
 
 This file contains the implementation of the PostgreSQL-based configuration backend.

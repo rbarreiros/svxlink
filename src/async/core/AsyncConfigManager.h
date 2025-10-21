@@ -1,7 +1,7 @@
 /**
 @file	 AsyncConfigManager.h
 @brief   Configuration manager that handles backend selection and initialization
-@author  Assistant
+@author  Rui Barreiros
 @date	 2025-09-19
 
 This file contains the configuration manager that reads db.conf to determine

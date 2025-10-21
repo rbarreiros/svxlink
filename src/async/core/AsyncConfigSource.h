@@ -1,18 +1,37 @@
 /**
- * @file   AsyncConfigSource.h
- * @brief  Configuration source URL parser and backend detection
- * @author Tobias Blomberg / SM0SVX & Ricardo Barreiros / CT7ALW
- * @date   2025-01-XX
- *
- * URL parsing and backend detection for configuration backends.
- * Separates parsing logic from factory pattern.
- *
- * Supports:
- *   - file://path/to/file.conf
- *   - sqlite://path/to/db.sqlite
- *   - mysql://user:pass@host:port/database
- *   - postgresql://user:pass@host:port/database
- */
+@file   AsyncConfigSource.h
+@brief  Configuration source URL parser and backend detection
+@author Rui Barreiros
+@date   2025-10-20
+
+This file contains the declaration of the ConfigSource class that is used to
+parse configuration source URLs and detect the backend type.
+
+Supports:
+  - file://path/to/file.conf
+  - sqlite://path/to/db.sqlite
+  - mysql://user:pass@host:port/database
+  - postgresql://user:pass@host:port/database
+
+\verbatim
+Async - A library for programming event driven applications
+Copyright (C) 2004-2025 Tobias Blomberg / SM0SVX
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+\endverbatim
+*/
 
 #ifndef ASYNC_CONFIG_SOURCE_INCLUDED
 #define ASYNC_CONFIG_SOURCE_INCLUDED

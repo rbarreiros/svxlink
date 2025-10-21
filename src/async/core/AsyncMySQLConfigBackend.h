@@ -1,7 +1,7 @@
 /**
 @file	 AsyncMySQLConfigBackend.h
 @brief   MySQL/MariaDB-based configuration backend implementation
-@author  Assistant
+@author  Rui Barreiros
 @date	 2025-09-19
 
 This file contains the MySQL/MariaDB-based configuration backend that stores

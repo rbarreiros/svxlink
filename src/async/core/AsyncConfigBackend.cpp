@@ -1,9 +1,31 @@
 /**
  * @file   AsyncConfigBackend.cpp
  * @brief  Implementation of ConfigBackend base class and factory functions
- * @author Tobias Blomberg / SM0SVX & Ricardo Barreiros / CT7ALW
- * @date   2025-01-XX
- */
+ * @author Rui Barreiros
+ * @date   2025-09-19
+
+This file contains the base class implementation for configuration backends that
+can load configuration data from various sources like files, databases, etc.
+
+\verbatim
+Async - A library for programming event driven applications
+Copyright (C) 2004-2025 Tobias Blomberg / SM0SVX
+
+This program is free software; you can redistribute  it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+\endverbatim
+*/
 
 #include "AsyncConfigBackend.h"
 #include "AsyncConfigSource.h"
@@ -43,8 +65,7 @@ bool ConfigBackend::changeNotificationsEnabled(void) const
 
 bool ConfigBackend::checkForExternalChanges(void)
 {
-  // Default implementation does nothing
-  // Database backends override this
+  // Database backends should override this
   return false;
 }
 
@@ -56,13 +77,15 @@ void ConfigBackend::startAutoPolling(unsigned int interval_ms)
     return;
   }
 
-  std::cout << "Starting auto-polling with interval: " << interval_ms << " milliseconds" << std::endl;
+  std::cout << "Starting auto-polling with interval: " 
+    << interval_ms << " milliseconds" << std::endl;
 
   m_current_poll_interval = interval_ms;
-  //stopAutoPolling();
+  // Always make sure the cleanup is done first!!
+  stopAutoPolling();
+  
   m_poll_timer = new Async::Timer(interval_ms, Async::Timer::TYPE_PERIODIC, true);
   m_poll_timer->expired.connect(sigc::mem_fun(*this, &ConfigBackend::onPollTimer));
-  m_poll_timer->setEnable(true);
 }
 
 void ConfigBackend::stopAutoPolling(void)

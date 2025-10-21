@@ -1,7 +1,7 @@
 /**
 @file	 AsyncSQLiteConfigBackend.h
 @brief   SQLite-based configuration backend implementation
-@author  Assistant
+@author  Rui Barreiros
 @date	 2025-09-19
 
 This file contains the SQLite-based configuration backend that stores

@@ -1,9 +1,27 @@
 /**
- * @file   AsyncConfigSource.cpp
- * @brief  Implementation of configuration source URL parser
- * @author Tobias Blomberg / SM0SVX & Ricardo Barreiros / CT7ALW
- * @date   2025-01-XX
- */
+@file   AsyncConfigSource.cpp
+@brief  Implementation of configuration source URL parser
+@author Rui Barreiros
+@date   2025-10-20
+
+This file contains the implementation of the ConfigSource class that is used to
+parse configuration source URLs and detect the backend type.
+
+\verbatim
+Async - A library for programming event driven applications
+Copyright (C) 2004-2025 Tobias Blomberg / SM0SVX
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it is useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+\endverbatim
+*/
 
 #include "AsyncConfigSource.h"
 #include <iostream>

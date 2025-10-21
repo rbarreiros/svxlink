@@ -1,17 +1,17 @@
 /**
 @file	 AsyncConfigBackend.h
 @brief   Abstract base class for configuration backends
-@author  Assistant
+@author  Rui Barreiros
 @date	 2025-09-19
 
-This file contains the abstract base class for configuration backends that
+This file contains the base class declarationfor configuration backends that
 can load configuration data from various sources like files, databases, etc.
 
 \verbatim
 Async - A library for programming event driven applications
 Copyright (C) 2004-2025 Tobias Blomberg / SM0SVX
 
-This program is free software; you can redistribute it and/or modify
+This program is free software; you can redistribute  it and/or modify
 it under the terms of the GNU General Public License as published by
 the Free Software Foundation; either version 2 of the License, or
 (at your option) any later version.
@@ -101,15 +101,6 @@ namespace Async
  *
  ****************************************************************************/
 
-/**
-@brief	Abstract base class for configuration backends
-@author Assistant
-@date   2025-09-19
-
-This is an abstract base class that defines the interface for configuration
-backends. Different implementations can load configuration data from various
-sources such as INI files, MySQL, PostgreSQL, SQLite databases, etc.
-*/
 class ConfigBackend : public sigc::trackable
 {
   public:
@@ -224,7 +215,8 @@ class ConfigBackend : public sigc::trackable
      * @return  true if changes were detected, false otherwise
      *
      * This method is called by the auto-polling timer (if enabled) or can be
-     * called manually. Database backends override this to check for changes.
+     * called manually. Database backends that require polling to check on
+     * database changes need to override this method.
      */
     virtual bool checkForExternalChanges(void);
 
@@ -260,8 +252,10 @@ class ConfigBackend : public sigc::trackable
      * @param   tag The configuration tag name
      * @param   value The new value
      *
-     * This signal is emitted when setValue() is called or when external
-     * changes are detected (for database backends).
+     * This signal can be emitted on notifyValueChanged() calls
+     * which signal that a value changed.
+     * 
+     * @see checkForExternalChanges()
      */
     sigc::signal<void(const std::string&, const std::string&, const std::string&)> valueChanged;
 
@@ -272,7 +266,9 @@ class ConfigBackend : public sigc::trackable
      * @param   tag The configuration tag name
      * @param   value The new value
      *
-     * Call this method from setValue() implementations to emit the valueChanged signal.
+     * Call this method from setValue() and checkForExternalChanges() implementations
+     * to emit the valueChanged signal.
+     * 
      * Respects the m_enable_change_notifications flag.
      */
     void notifyValueChanged(const std::string& section,
@@ -286,11 +282,33 @@ class ConfigBackend : public sigc::trackable
      */
     void onPollTimer(Async::Timer* timer);
 
-    bool m_enable_change_notifications;  ///< Whether notifications are enabled
-    unsigned int m_default_poll_interval; ///< Default polling interval (ms)
-    unsigned int m_current_poll_interval; ///< Current polling interval (ms), 0 if not polling
-    Async::Timer* m_poll_timer;           ///< Auto-polling timer
-    // Disable copy constructor and assignment operator
+    /**
+     * @brief   Whether change notifications are enabled
+     * @return  true if notifications are enabled, false otherwise
+     */
+      bool m_enable_change_notifications;
+
+    /**
+     * @brief   Default polling interval
+     * @return  The default polling interval in milliseconds
+     */
+    unsigned int m_default_poll_interval;
+
+    /**
+     * @brief   Current polling interval
+     * @return  The current polling interval in milliseconds, 0 if not polling
+     */
+    unsigned int m_current_poll_interval;
+
+    /**
+     * @brief   Auto-polling timer
+     * @return  The auto-polling timer
+     */
+    Async::Timer* m_poll_timer;
+
+    /**
+     * @brief   Disable copy constructor and assignment operator
+     */
     ConfigBackend(const ConfigBackend&) = delete;
     ConfigBackend& operator=(const ConfigBackend&) = delete;
 
@@ -303,7 +321,7 @@ using ConfigBackendPtr = std::unique_ptr<ConfigBackend>;
 
 /****************************************************************************
  *
- * Factory Pattern Support
+ * AsyncFactory Pattern Support
  *
  ****************************************************************************/
 

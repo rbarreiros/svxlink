@@ -1,7 +1,7 @@
 /**
 @file	 AsyncFileConfigBackend.h
 @brief   File-based configuration backend implementation
-@author  Assistant
+@author  Tobias Blomberg / Rui Barreiros
 @date	 2025-09-19
 
 This file contains the file-based configuration backend that reads INI-formatted

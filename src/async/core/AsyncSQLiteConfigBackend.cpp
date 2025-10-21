@@ -1,7 +1,7 @@
 /**
 @file	 AsyncSQLiteConfigBackend.cpp
 @brief   SQLite-based configuration backend implementation
-@author  Assistant
+@author  Rui Barreiros
 @date	 2025-09-19
 
 This file contains the implementation of the SQLite-based configuration backend.

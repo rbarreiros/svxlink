@@ -1,7 +1,7 @@
 /**
 @file	 AsyncFileConfigBackend.cpp
 @brief   File-based configuration backend implementation
-@author  Assistant
+@author  Tobias Blomberg / Rui Barreiros
 @date	 2025-09-19
 
 This file contains the implementation of the file-based configuration backend

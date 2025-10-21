@@ -1,12 +1,12 @@
 /**
 @file	 AsyncConfig.cpp
-@brief   A class for reading "INI-foramtted" configuration files
+@brief   A class for configuration handling
 @author  Tobias Blomberg / SM0SVX
 @date	 2004-03-17
 
-This file contains a class that is used to read configuration files that is
-in the famous MS Windows INI file format. An example of a configuration file
-is shown below.
+This file contains a class that is used to supply and save configuration data
+to a backend which can be a file, a database, etc. The backend can be
+implemented by extending AsyncConfigBackend.
 
 \include test.cfg
 

@@ -1,7 +1,7 @@
 /**
 @file	 AsyncPostgreSQLConfigBackend.h
 @brief   PostgreSQL-based configuration backend implementation
-@author  Assistant
+@author  Rui Barreiros
 @date	 2025-09-19
 
 This file contains the PostgreSQL-based configuration backend that stores
