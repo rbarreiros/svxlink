@@ -272,16 +272,12 @@ bool Module::squelchIsOpen(void)
 } /* Module::squelchIsOpen */
 
 
-void Module::cfgUpdated(const std::string& section, const std::string& tag)
+void Module::cfgUpdated(const std::string& section, const std::string& tag, const std::string& value)
 {
   if (section == cfgName())
   {
-    std::string value;
-    if (cfg().getValue(cfgName(), tag, value))
-    {
-      setEventVariable(name() + "::CFG_" + tag, value);
-      processEvent("config_updated CFG_" + tag + " \"" + value + "\"");
-    }
+    setEventVariable(name() + "::CFG_" + tag, value);
+    processEvent("config_updated CFG_" + tag + " \"" + value + "\"");
   }
 } /* Module::cfgUpdated */
 

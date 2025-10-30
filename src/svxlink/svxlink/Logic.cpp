@@ -1844,16 +1844,13 @@ void Logic::detectedTone(float fq)
 } /* Logic::detectedTone */
 
 
-void Logic::cfgUpdated(const std::string& section, const std::string& tag)
+void Logic::cfgUpdated(const std::string& section, const std::string& tag, const std::string& value)
 {
   if (section == name())
   {
-    std::string value;
-    if (cfg().getValue(name(), tag, value))
-    {
-      event_handler->setVariable(name() + "::Logic::CFG_" + tag, value);
-      processEvent("config_updated CFG_" + tag + " \"" + value + "\"");
-    }
+    event_handler->setVariable(name() + "::Logic::CFG_" + tag, value);
+    processEvent("config_updated CFG_" + tag + " \"" + value + "\"");
+    
     if (tag == "ONLINE")
     {
       bool online;

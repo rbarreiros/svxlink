@@ -133,17 +133,8 @@ bool SQLiteConfigBackend::open(const string& source)
     return false;
   }
   
-  // Create tables if they don't exist
-  if (!createTables())
-  {
-    cerr << "*** ERROR: Failed to create database tables" << endl;
-    close();
-    return false;
-  }
-  
-  // Initialize m_last_check_time to the most recent updated_at in the database
-  // This prevents detecting all existing records as "changes" on first poll
-  initializeLastCheckTime();
+  // Note: Tables will be created later after table prefix is set
+  // createTables() and initializeLastCheckTime() are now called from initializeDatabase()
   
   return true;
 } /* SQLiteConfigBackend::open */
@@ -171,10 +162,11 @@ bool SQLiteConfigBackend::getValue(const std::string& section, const std::string
     return false;
   }
   
-  const char* sql = "SELECT value FROM config WHERE section = ? AND tag = ?";
+  std::string table_name = getFullTableName("config");
+  std::string sql = "SELECT value FROM " + table_name + " WHERE section = ? AND tag = ?";
   sqlite3_stmt* stmt;
   
-  int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
+  int rc = sqlite3_prepare_v2(m_db, sql.c_str(), -1, &stmt, nullptr);
   if (rc != SQLITE_OK)
   {
     cerr << "*** ERROR: Failed to prepare SELECT statement: " << getLastError() << endl;
@@ -221,11 +213,12 @@ bool SQLiteConfigBackend::setValue(const std::string& section, const std::string
     return false;
   }
   
-  const char* sql = "INSERT OR REPLACE INTO config (section, tag, value, updated_at) "
+  std::string table_name = getFullTableName("config");
+  std::string sql = "INSERT OR REPLACE INTO " + table_name + " (section, tag, value, updated_at) "
                     "VALUES (?, ?, ?, CURRENT_TIMESTAMP)";
   sqlite3_stmt* stmt;
   
-  int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
+  int rc = sqlite3_prepare_v2(m_db, sql.c_str(), -1, &stmt, nullptr);
   if (rc != SQLITE_OK)
   {
     cerr << "*** ERROR: Failed to prepare INSERT statement: " << getLastError() << endl;
@@ -258,10 +251,11 @@ list<string> SQLiteConfigBackend::listSections(void) const
     return sections;
   }
   
-  const char* sql = "SELECT DISTINCT section FROM config ORDER BY section";
+  std::string table_name = getFullTableName("config");
+  std::string sql = "SELECT DISTINCT section FROM " + table_name + " ORDER BY section";
   sqlite3_stmt* stmt;
   
-  int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
+  int rc = sqlite3_prepare_v2(m_db, sql.c_str(), -1, &stmt, nullptr);
   if (rc != SQLITE_OK)
   {
     cerr << "*** ERROR: Failed to prepare SELECT DISTINCT statement: " << getLastError() << endl;
@@ -297,10 +291,11 @@ list<string> SQLiteConfigBackend::listSection(const string& section) const
     return tags;
   }
   
-  const char* sql = "SELECT tag FROM config WHERE section = ? ORDER BY tag";
+  std::string table_name = getFullTableName("config");
+  std::string sql = "SELECT tag FROM " + table_name + " WHERE section = ? ORDER BY tag";
   sqlite3_stmt* stmt;
   
-  int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
+  int rc = sqlite3_prepare_v2(m_db, sql.c_str(), -1, &stmt, nullptr);
   if (rc != SQLITE_OK)
   {
     cerr << "*** ERROR: Failed to prepare SELECT tags statement: " << getLastError() << endl;
@@ -339,6 +334,28 @@ std::string SQLiteConfigBackend::getBackendInfo(void) const
   return m_db_path;
 } /* SQLiteConfigBackend::getBackendInfo */
 
+bool SQLiteConfigBackend::initializeTables(void)
+{
+  if (!isOpen())
+  {
+    cerr << "*** ERROR: Cannot initialize tables - database not open" << endl;
+    return false;
+  }
+  
+  // Create tables if they don't exist
+  if (!createTables())
+  {
+    cerr << "*** ERROR: Failed to create database tables" << endl;
+    return false;
+  }
+  
+  // Initialize m_last_check_time to the most recent updated_at in the database
+  // This prevents detecting all existing records as "changes" on first poll
+  initializeLastCheckTime();
+  
+  return true;
+} /* SQLiteConfigBackend::initializeTables */
+
 bool SQLiteConfigBackend::checkForExternalChanges(void)
 {
   if (!isOpen())
@@ -347,10 +364,11 @@ bool SQLiteConfigBackend::checkForExternalChanges(void)
   }
 
   // Query for all records updated since last check
-  const char* sql = "SELECT section, tag, value, updated_at FROM config WHERE updated_at > ? ORDER BY updated_at";
+  std::string table_name = getFullTableName("config");
+  std::string sql = "SELECT section, tag, value, updated_at FROM " + table_name + " WHERE updated_at > ? ORDER BY updated_at";
   sqlite3_stmt* stmt;
 
-  int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
+  int rc = sqlite3_prepare_v2(m_db, sql.c_str(), -1, &stmt, nullptr);
   if (rc != SQLITE_OK)
   {
     cerr << "*** ERROR: Failed to prepare change detection query: " << getLastError() << endl;
@@ -419,8 +437,11 @@ bool SQLiteConfigBackend::checkForExternalChanges(void)
 
 bool SQLiteConfigBackend::createTables(void)
 {
-  const char* create_config_table = 
-    "CREATE TABLE IF NOT EXISTS config ("
+  // Get the full table name with prefix
+  std::string table_name = getFullTableName("config");
+  
+  std::string create_config_table = 
+    "CREATE TABLE IF NOT EXISTS " + table_name + " ("
     "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
     "  section TEXT NOT NULL,"
     "  tag TEXT NOT NULL,"
@@ -432,13 +453,13 @@ bool SQLiteConfigBackend::createTables(void)
   
   if (!executeSQL(create_config_table))
   {
-    cerr << "*** ERROR: Failed to create config table" << endl;
+    cerr << "*** ERROR: Failed to create config table: " << table_name << endl;
     return false;
   }
   
   // Create index for faster lookups
-  const char* create_index = 
-    "CREATE INDEX IF NOT EXISTS idx_config_section_tag ON config(section, tag)";
+  std::string create_index = 
+    "CREATE INDEX IF NOT EXISTS idx_" + table_name + "_section_tag ON " + table_name + "(section, tag)";
   
   if (!executeSQL(create_index))
   {
@@ -447,12 +468,12 @@ bool SQLiteConfigBackend::createTables(void)
   }
   
   // Create trigger to automatically update updated_at on any UPDATE
-  const char* create_trigger = 
-    "CREATE TRIGGER IF NOT EXISTS update_config_timestamp "
-    "AFTER UPDATE ON config "
+  std::string create_trigger = 
+    "CREATE TRIGGER IF NOT EXISTS update_" + table_name + "_timestamp "
+    "AFTER UPDATE ON " + table_name + " "
     "FOR EACH ROW "
     "BEGIN "
-    "  UPDATE config SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id; "
+    "  UPDATE " + table_name + " SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id; "
     "END";
   
   if (!executeSQL(create_trigger))
@@ -501,10 +522,11 @@ void SQLiteConfigBackend::initializeLastCheckTime(void)
   }
 
   // Query for the most recent updated_at timestamp in the database
-  const char* sql = "SELECT MAX(updated_at) FROM config";
+  std::string table_name = getFullTableName("config");
+  std::string sql = "SELECT MAX(updated_at) FROM " + table_name;
   sqlite3_stmt* stmt;
 
-  int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
+  int rc = sqlite3_prepare_v2(m_db, sql.c_str(), -1, &stmt, nullptr);
   if (rc != SQLITE_OK)
   {
     std::cerr << "*** WARNING: Failed to query max updated_at: " << getLastError() << std::endl;

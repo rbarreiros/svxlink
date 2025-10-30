@@ -1634,10 +1634,10 @@ bool SipLogic::getConfigValue(const std::string& section,
 } /* SipLogic::getConfigValue */
 
 
-void SipLogic::cfgUpdated(const std::string& section, const std::string& tag)
+void SipLogic::cfgUpdated(const std::string& section, const std::string& tag, const std::string& value)
 {
-  // Call parent implementation first
-  LogicBase::cfgUpdated(section, tag);
+  // Call parent implementation first (if it exists)
+  // LogicBase::cfgUpdated(section, tag, value);
   
   if (section == name())
   {

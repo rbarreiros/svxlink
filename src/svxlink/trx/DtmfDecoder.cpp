@@ -175,7 +175,7 @@ bool DtmfDecoder::initialize(void)
  *
  ****************************************************************************/
 
-void DtmfDecoder::cfgUpdated(const std::string& section, const std::string& tag)
+void DtmfDecoder::cfgUpdated(const std::string& section, const std::string& tag, const std::string& value)
 {
   if (section == name())
   {

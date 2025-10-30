@@ -1596,41 +1596,73 @@ void Reflector::ctrlPtyDataReceived(const void *buf, size_t count)
 } /* Reflector::ctrlPtyDataReceived */
 
 
-void Reflector::cfgUpdated(const std::string& section, const std::string& tag)
+void Reflector::cfgUpdated(const std::string& section, const std::string& tag, const std::string& value)
 {
-  std::string value;
-  if (!m_cfg->getValue(section, tag, value))
-  {
-    std::cout << "*** ERROR: Failed to read updated configuration variable '"
-              << section << "/" << tag << "'" << std::endl;
-    return;
-  }
+  // Certificate related configuration changes require a server restart, should not be changed while
+  // running.....
+
+  std::cout << "### Reflector::cfgUpdated: " << section << "/" << tag << "=" << value << std::endl;
 
   if (section == "GLOBAL")
   {
-    if (tag == "SQL_TIMEOUT_BLOCKTIME")
+    if (tag == "SQL_TIMEOUT")
     {
-      unsigned t = TGHandler::instance()->sqlTimeoutBlocktime();
-      if (!SvxLink::setValueFromString(t, value))
-      {
-        std::cout << "*** ERROR: Failed to set updated configuration "
-                     "variable '" << section << "/" << tag << "'" << std::endl;
-        return;
-      }
-      TGHandler::instance()->setSqlTimeoutBlocktime(t);
-      //std::cout << "### New value for " << tag << "=" << t << std::endl;
+      TGHandler::instance()->setSqlTimeout(std::atoi(value.c_str()));
     }
-    else if (tag == "SQL_TIMEOUT")
+    else if (tag == "SQL_TIMEOUT_BLOCKTIME")
     {
-      unsigned t = TGHandler::instance()->sqlTimeout();
-      if (!SvxLink::setValueFromString(t, value))
+      TGHandler::instance()->setSqlTimeoutBlocktime(std::atoi(value.c_str()));
+    }
+    else if (tag == "TG_FOR_V1_CLIENTS")
+    {
+      m_tg_for_v1_clients = std::atoi(value.c_str());
+    }
+    else if (tag == "RANDOM_QSY_RANGE")
+    {
+      m_random_qsy_lo = std::atoi(value.c_str());
+      m_random_qsy_hi = std::atoi(value.c_str());
+
+      if((m_random_qsy_lo < 1) || (m_random_qsy_hi < m_random_qsy_lo))
       {
-        std::cout << "*** ERROR: Failed to set updated configuration "
-                     "variable '" << section << "/" << tag << "'" << std::endl;
+        std::cout << "*** ERROR: Illegal RANDOM_QSY_RANGE specified. Ignored." << std::endl;
+        m_random_qsy_hi = m_random_qsy_lo = 0;
+      }
+      m_random_qsy_tg = m_random_qsy_hi;
+    }
+    else if (tag == "HTTP_SRV_PORT")
+    {
+      if(m_http_server != nullptr)
+      {
+        // http server already running, stop it
+        delete m_http_server;
+        m_http_server = nullptr;
+      }
+      m_http_server = new Async::TcpServer<Async::HttpServerConnection>(value);
+      m_http_server->clientConnected.connect(
+          sigc::mem_fun(*this, &Reflector::httpClientConnected));
+      m_http_server->clientDisconnected.connect(
+          sigc::mem_fun(*this, &Reflector::httpClientDisconnected));
+    }
+    else if (tag == "COMMAND_PTY")
+    {
+      if(m_cmd_pty != nullptr)
+      {
+        delete m_cmd_pty;
+        m_cmd_pty = nullptr;
+      }
+      m_cmd_pty = new Pty(value);
+      if((m_cmd_pty == nullptr) || !m_cmd_pty->open())
+      {
+        std::cerr << "*** ERROR: Could not open command PTY '" << value << "'" << std::endl;
         return;
       }
-      TGHandler::instance()->setSqlTimeout(t);
-      //std::cout << "### New value for " << tag << "=" << t << std::endl;
+      m_cmd_pty->setLineBuffered(true);
+      m_cmd_pty->dataReceived.connect(
+          sigc::mem_fun(*this, &Reflector::ctrlPtyDataReceived));
+    }
+    else if (tag == "ACCEPT_CERT_EMAIL")
+    {
+      m_accept_cert_email = value;
     }
   }
 } /* Reflector::cfgUpdated */
@@ -2256,7 +2288,6 @@ void Reflector::runCAHook(const Async::Exec::Environment& env)
     ca_hook->run();
   }
 } /* Reflector::runCAHook */
-
 
 /*
  * This file has not been truncated

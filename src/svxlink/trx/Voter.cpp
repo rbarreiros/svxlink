@@ -1432,7 +1432,7 @@ void Voter::setRxEnabled(const std::string &rx_name,
 } /* Voter::setRxEnabled */
 
 
-void Voter::cfgUpdated(const std::string& section, const std::string& tag)
+void Voter::cfgUpdated(const std::string& section, const std::string& tag, const std::string& value)
 {
   if (section == name())
   {

@@ -172,7 +172,7 @@ class SipLogic : public LogicBase
      * @param section The configuration section name  
      * @param tag The configuration tag name
      */
-    virtual void cfgUpdated(const std::string& section, const std::string& tag) override;
+    virtual void cfgUpdated(const std::string& section, const std::string& tag, const std::string& value) override;
 
     virtual void allMsgsWritten(void);
     std::string initCallHandler(int argc, const char* argv[]);

@@ -151,13 +151,8 @@ bool MySQLConfigBackend::open(const string& source)
     return false;
   }
     
-  // Create tables if they don't exist
-  if (!createTables())
-  {
-    cerr << "*** ERROR: Failed to create database tables" << endl;
-    close();
-    return false;
-  }
+  // Note: Tables will be created later after table prefix is set
+  // createTables() is now called from initializeDatabase()
   
   return true;
 } /* MySQLConfigBackend::open */
@@ -185,11 +180,12 @@ bool MySQLConfigBackend::getValue(const std::string& section, const std::string&
     return false;
   }
   
+  std::string table_name = getFullTableName("config");
   string escaped_section = escapeString(section);
   string escaped_tag = escapeString(tag);
   
   ostringstream query;
-  query << "SELECT value FROM config WHERE section = '" << escaped_section 
+  query << "SELECT value FROM " << table_name << " WHERE section = '" << escaped_section 
         << "' AND tag = '" << escaped_tag << "'";
   
   if (mysql_query(m_mysql, query.str().c_str()) != 0)
@@ -225,12 +221,13 @@ bool MySQLConfigBackend::setValue(const std::string& section, const std::string&
     return false;
   }
   
+  std::string table_name = getFullTableName("config");
   string escaped_section = escapeString(section);
   string escaped_tag = escapeString(tag);
   string escaped_value = escapeString(value);
   
   ostringstream query;
-  query << "INSERT INTO config (section, tag, value) VALUES ('"
+  query << "INSERT INTO " << table_name << " (section, tag, value) VALUES ('"
         << escaped_section << "', '" << escaped_tag << "', '" << escaped_value
         << "') ON DUPLICATE KEY UPDATE value = '" << escaped_value 
         << "', updated_at = CURRENT_TIMESTAMP";
@@ -254,9 +251,11 @@ list<string> MySQLConfigBackend::listSections(void) const
     return sections;
   }
   
-  const char* query = "SELECT DISTINCT section FROM config ORDER BY section";
+  std::string table_name = getFullTableName("config");
+  std::ostringstream query;
+  query << "SELECT DISTINCT section FROM " << table_name << " ORDER BY section";
   
-  if (mysql_query(m_mysql, query) != 0)
+  if (mysql_query(m_mysql, query.str().c_str()) != 0)
   {
     cerr << "*** ERROR: Failed to execute SELECT DISTINCT query: " << getLastError() << endl;
     return sections;
@@ -291,10 +290,11 @@ list<string> MySQLConfigBackend::listSection(const string& section) const
     return tags;
   }
   
+  std::string table_name = getFullTableName("config");
   string escaped_section = escapeString(section);
   
   ostringstream query;
-  query << "SELECT tag FROM config WHERE section = '" << escaped_section 
+  query << "SELECT tag FROM " << table_name << " WHERE section = '" << escaped_section 
         << "' ORDER BY tag";
   
   if (mysql_query(m_mysql, query.str().c_str()) != 0)
@@ -344,6 +344,24 @@ std::string MySQLConfigBackend::getBackendInfo(void) const
   return info.str();
 } /* MySQLConfigBackend::getBackendInfo */
 
+bool MySQLConfigBackend::initializeTables(void)
+{
+  if (!isOpen())
+  {
+    cerr << "*** ERROR: Cannot initialize tables - database not open" << endl;
+    return false;
+  }
+  
+  // Create tables if they don't exist
+  if (!createTables())
+  {
+    cerr << "*** ERROR: Failed to create database tables" << endl;
+    return false;
+  }
+  
+  return true;
+} /* MySQLConfigBackend::initializeTables */
+
 bool MySQLConfigBackend::checkForExternalChanges(void)
 {
   if (!isOpen())
@@ -352,9 +370,10 @@ bool MySQLConfigBackend::checkForExternalChanges(void)
   }
 
   // Query for all records updated since last check
+  std::string table_name = getFullTableName("config");
   string escaped_last_check = escapeString(m_last_check_time);
   ostringstream query;
-  query << "SELECT section, tag, value, updated_at FROM config "
+  query << "SELECT section, tag, value, updated_at FROM " << table_name << " "
         << "WHERE updated_at > '" << escaped_last_check << "' "
         << "ORDER BY updated_at";
 
@@ -458,19 +477,21 @@ bool MySQLConfigBackend::parseConnectionString(const std::string& conn_str, Conn
 
 bool MySQLConfigBackend::createTables(void)
 {
-  const char* create_table_sql = 
-    "CREATE TABLE IF NOT EXISTS config ("
+  std::string table_name = getFullTableName("config");
+  
+  std::ostringstream create_table_sql;
+  create_table_sql << "CREATE TABLE IF NOT EXISTS " << table_name << " ("
     "  id INT AUTO_INCREMENT PRIMARY KEY,"
     "  section VARCHAR(255) NOT NULL,"
     "  tag VARCHAR(255) NOT NULL,"
     "  value TEXT NOT NULL,"
     "  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
     "  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
-    "  UNIQUE KEY unique_config (section, tag),"
-    "  INDEX idx_section (section)"
+    "  UNIQUE KEY unique_" << table_name << " (section, tag),"
+    "  INDEX idx_" << table_name << "_section (section)"
     ") ENGINE=InnoDB DEFAULT CHARSET=utf8";
   
-  if (mysql_query(m_mysql, create_table_sql) != 0)
+  if (mysql_query(m_mysql, create_table_sql.str().c_str()) != 0)
   {
     cerr << "*** ERROR: Failed to create config table: " << getLastError() << endl;
     return false;

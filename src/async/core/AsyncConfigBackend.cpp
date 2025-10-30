@@ -53,6 +53,16 @@ ConfigBackend::~ConfigBackend(void)
   stopAutoPolling();
 }
 
+void ConfigBackend::setTablePrefix(const std::string& prefix)
+{
+  m_table_prefix = prefix;
+}
+
+std::string ConfigBackend::getFullTableName(const std::string& base_name) const
+{
+  return m_table_prefix + base_name;
+}
+
 void ConfigBackend::enableChangeNotifications(bool enable)
 {
   m_enable_change_notifications = enable;

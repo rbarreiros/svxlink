@@ -199,6 +199,31 @@ class ConfigBackend : public sigc::trackable
     virtual std::string getBackendInfo(void) const = 0;
 
     /**
+     * @brief   Set the table prefix for database backends
+     * @param   prefix The prefix to use for table names (e.g., "svxlink_", "prod_svxreflector_")
+     *
+     * This method allows setting a custom table prefix for database backends.
+     * The prefix will be prepended to the base table name ("config") to create
+     * isolated table names for different applications or environments.
+     * 
+     * For file backends, this has no effect.
+     */
+    virtual void setTablePrefix(const std::string& prefix);
+
+    /**
+     * @brief   Get the current table prefix
+     * @return  The current table prefix
+     */
+    const std::string& getTablePrefix(void) const { return m_table_prefix; }
+
+    /**
+     * @brief   Initialize database tables (for database backends)
+     * @return  true on success, false on failure
+     * @note    This should be called after setTablePrefix() and before any data access
+     */
+    virtual bool initializeTables(void) { return true; }
+
+    /**
      * @brief   Enable or disable change notifications
      * @param   enable true to enable, false to disable
      */
@@ -275,12 +300,28 @@ class ConfigBackend : public sigc::trackable
                            const std::string& tag,
                            const std::string& value);
 
+  protected:
+    /**
+     * @brief   Get the full table name with prefix
+     * @param   base_name The base table name (e.g., "config")
+     * @return  The full table name with prefix applied
+     *
+     * Helper method for database backends to construct full table names.
+     * Returns prefix + base_name (e.g., "svxlink_config", "prod_reflector_config")
+     */
+    std::string getFullTableName(const std::string& base_name) const;
+
   private:
     /**
      * @brief   Timer callback for auto-polling
      * @param   timer The timer that expired
      */
     void onPollTimer(Async::Timer* timer);
+
+    /**
+     * @brief   Table prefix for database backends
+     */
+    std::string m_table_prefix;
 
     /**
      * @brief   Whether change notifications are enabled

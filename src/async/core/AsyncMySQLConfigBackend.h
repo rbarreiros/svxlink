@@ -211,6 +211,12 @@ class MySQLConfigBackend : public ConfigBackend
      */
     virtual bool checkForExternalChanges(void) override;
 
+    /**
+     * @brief Initialize database tables
+     * @return true on success, false on failure
+     */
+    virtual bool initializeTables(void) override;
+
   protected:
 
   private:

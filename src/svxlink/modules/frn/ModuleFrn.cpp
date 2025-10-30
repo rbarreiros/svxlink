@@ -486,10 +486,10 @@ void ModuleFrn::onQsoError(void)
 }
 
 
-void ModuleFrn::cfgUpdated(const std::string& section, const std::string& tag)
+void ModuleFrn::cfgUpdated(const std::string& section, const std::string& tag, const std::string& value)
 {
   // Call parent implementation first
-  Module::cfgUpdated(section, tag);
+  Module::cfgUpdated(section, tag, value);
   
   // Update QsoFrn configuration if this is our section
   if (section == cfgName() && qso != nullptr)

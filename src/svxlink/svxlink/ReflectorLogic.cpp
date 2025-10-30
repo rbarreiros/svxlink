@@ -2768,7 +2768,7 @@ void ReflectorLogic::csrAddSubjectNamesFromConfig(void)
 } /* ReflectorLogic::csrAddSubjectName */
 
 
-void ReflectorLogic::cfgUpdated(const std::string& section, const std::string& tag)
+void ReflectorLogic::cfgUpdated(const std::string& section, const std::string& tag, const std::string& value)
 {
   if (section == name())
   {

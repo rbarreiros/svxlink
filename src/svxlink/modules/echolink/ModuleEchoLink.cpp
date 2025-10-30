@@ -2236,7 +2236,7 @@ bool ModuleEchoLink::setAcceptOutgoingRegex(void)
 
 
 void ModuleEchoLink::cfgValueUpdated(const std::string& section,
-    const std::string& tag)
+    const std::string& tag, const std::string& value)
 {
   if (section != cfgName())
   {

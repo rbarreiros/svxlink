@@ -147,8 +147,8 @@ bool Config::open(const string& config_dir)
 {
   ConfigManager manager;
 
-  // Initialize backend using db.conf
-  m_backend = manager.initializeBackend(config_dir);
+  // Initialize backend using db.conf with default config file name and table prefix
+  m_backend = manager.initializeBackend(config_dir, "svxlink.conf", "svxlink_");
   if (m_backend == nullptr)
   {
     cerr << "*** FATAL ERROR: " << manager.getLastError() << endl;
@@ -185,10 +185,12 @@ bool Config::open(const string& config_dir)
 
 bool Config::openFromDbConfig(const string& db_conf_path)
 {
+  // Extract the default config file name from db_conf_path or use svxlink.conf
+  // This maintains backward compatibility
   ConfigManager manager;
 
-  // Initialize backend using specific db.conf file
-  m_backend = manager.initializeBackendFromFile(db_conf_path);
+  // Initialize backend using specific db.conf file with default config file name and table prefix
+  m_backend = manager.initializeBackendFromFile(db_conf_path, "svxlink.conf", "svxlink_");
   if (m_backend == nullptr)
   {
     cerr << "*** FATAL ERROR: " << manager.getLastError() << endl;
@@ -398,7 +400,7 @@ void Config::setValue(const std::string& section, const std::string& tag,
     syncToBackend(section, tag);
     
     // Emit signals and call subscribers
-    valueUpdated(section, tag);
+    valueUpdated(section, tag, value);
     for (const auto& func : values[tag].subs)
     {
       func(value);
@@ -532,7 +534,7 @@ void Config::reload(void)
               }
               
               // Emit valueUpdated signal
-              valueUpdated(section + "/" + tag, new_value);
+              valueUpdated(section, tag, new_value);
             }
           }
         }
@@ -577,7 +579,7 @@ void Config::onBackendValueChanged(const std::string& section,
   }
 
   // Emit valueUpdated signal
-  valueUpdated(section + "/" + tag, value);
+  valueUpdated(section, tag, value);
 } /* Config::onBackendValueChanged */
 
 void Config::connectBackendSignals(void)
@@ -596,6 +598,18 @@ Config::ConfigLoadResult Config::openWithFallback(const std::string& cmdline_con
   ConfigLoadResult result;
   result.success = false;
   result.used_dbconfig = false;
+
+  // Derive table prefix from config name
+  // svxlink.conf → svxlink_
+  // svxreflector.conf → svxreflector_
+  // remotetrx.conf → remotetrx_
+  std::string default_table_prefix;
+  size_t dot_pos = default_config_name.find('.');
+  if (dot_pos != std::string::npos)
+  {
+    std::string base_name = default_config_name.substr(0, dot_pos);
+    default_table_prefix = base_name + "_";
+  }
 
   // Priority 1: --config option
   if (!cmdline_config.empty())
@@ -619,20 +633,38 @@ Config::ConfigLoadResult Config::openWithFallback(const std::string& cmdline_con
   // Priority 2: --dbconfig option
   if (!cmdline_dbconfig.empty())
   {
-    if (openFromDbConfig(cmdline_dbconfig))
+    ConfigManager manager;
+    m_backend = manager.initializeBackendFromFile(cmdline_dbconfig, default_config_name, default_table_prefix);
+    if (m_backend == nullptr)
     {
-      result.success = true;
-      result.source_type = "command_line";
-      result.source_path = cmdline_dbconfig;
-      result.backend_type = getBackendType();
-      result.used_dbconfig = true;
+      result.error_message = "Failed to open database configuration: " + cmdline_dbconfig + " - " + manager.getLastError();
       return result;
     }
-    else
+    
+    m_main_config_file = manager.getMainConfigReference();
+    
+    // Disable notifications during initial config load
+    bool was_enabled = m_backend->changeNotificationsEnabled();
+    if (was_enabled)
     {
-      result.error_message = "Failed to open database configuration: " + cmdline_dbconfig;
-      return result;
+      m_backend->enableChangeNotifications(false);
     }
+    
+    loadFromBackend();
+    
+    if (was_enabled)
+    {
+      m_backend->enableChangeNotifications(true);
+    }
+    
+    connectBackendSignals();
+    
+    result.success = true;
+    result.source_type = "command_line";
+    result.source_path = cmdline_dbconfig;
+    result.backend_type = getBackendType();
+    result.used_dbconfig = true;
+    return result;
   }
 
   // Priority 3: Search for db.conf in standard locations
@@ -647,20 +679,39 @@ Config::ConfigLoadResult Config::openWithFallback(const std::string& cmdline_con
     struct stat st;
     if (stat(db_conf_path.c_str(), &st) == 0)
     {
-      if (openFromDbConfig(db_conf_path))
+      // Use default config name and table prefix
+      ConfigManager manager;
+      m_backend = manager.initializeBackendFromFile(db_conf_path, default_config_name, default_table_prefix);
+      if (m_backend == nullptr)
       {
-        result.success = true;
-        result.source_type = "dbconfig";
-        result.source_path = db_conf_path;
-        result.backend_type = getBackendType();
-        result.used_dbconfig = true;
+        result.error_message = "Found db.conf at " + db_conf_path + " but failed to load it: " + manager.getLastError();
         return result;
       }
-      else
+      
+      m_main_config_file = manager.getMainConfigReference();
+      
+      // Disable notifications during initial config load
+      bool was_enabled = m_backend->changeNotificationsEnabled();
+      if (was_enabled)
       {
-        result.error_message = "Found db.conf at " + db_conf_path + " but failed to load it";
-        return result;
+        m_backend->enableChangeNotifications(false);
       }
+      
+      loadFromBackend();
+      
+      if (was_enabled)
+      {
+        m_backend->enableChangeNotifications(true);
+      }
+      
+      connectBackendSignals();
+      
+      result.success = true;
+      result.source_type = "dbconfig";
+      result.source_path = db_conf_path;
+      result.backend_type = getBackendType();
+      result.used_dbconfig = true;
+      return result;
     }
   }
 

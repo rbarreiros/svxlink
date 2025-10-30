@@ -126,13 +126,8 @@ bool PostgreSQLConfigBackend::open(const string& source)
     return false;
   }
   
-  // Create tables if they don't exist
-  if (!createTables())
-  {
-    cerr << "*** ERROR: Failed to create database tables" << endl;
-    close();
-    return false;
-  }
+  // Note: Tables will be created later after table prefix is set
+  // createTables() is now called from initializeDatabase()
   
   return true;
 } /* PostgreSQLConfigBackend::open */
@@ -161,10 +156,13 @@ bool PostgreSQLConfigBackend::getValue(const std::string& section, const std::st
     return false;
   }
   
+  std::string table_name = getFullTableName("config");
+  std::string sql = "SELECT value FROM " + table_name + " WHERE section = $1 AND tag = $2";
+  
   const char* params[2] = { section.c_str(), tag.c_str() };
   
   PGresult* result = PQexecParams(m_conn,
-                                  "SELECT value FROM config WHERE section = $1 AND tag = $2",
+                                  sql.c_str(),
                                   2,      // number of parameters
                                   nullptr, // parameter types (NULL = infer)
                                   params, // parameter values
@@ -207,12 +205,15 @@ bool PostgreSQLConfigBackend::setValue(const std::string& section, const std::st
     return false;
   }
   
+  std::string table_name = getFullTableName("config");
+  std::string sql = "INSERT INTO " + table_name + " (section, tag, value) VALUES ($1, $2, $3) "
+                    "ON CONFLICT (section, tag) DO UPDATE SET "
+                    "value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP";
+  
   const char* params[3] = { section.c_str(), tag.c_str(), value.c_str() };
   
   PGresult* result = PQexecParams(m_conn,
-                                  "INSERT INTO config (section, tag, value) VALUES ($1, $2, $3) "
-                                  "ON CONFLICT (section, tag) DO UPDATE SET "
-                                  "value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP",
+                                  sql.c_str(),
                                   3,      // number of parameters
                                   nullptr, // parameter types (NULL = infer)
                                   params, // parameter values
@@ -241,7 +242,10 @@ list<string> PostgreSQLConfigBackend::listSections(void) const
     return sections;
   }
   
-  PGresult* result = executeQueryWithResult("SELECT DISTINCT section FROM config ORDER BY section");
+  std::string table_name = getFullTableName("config");
+  std::string sql = "SELECT DISTINCT section FROM " + table_name + " ORDER BY section";
+  
+  PGresult* result = executeQueryWithResult(sql);
   if (result == nullptr)
   {
     return sections;
@@ -270,10 +274,13 @@ list<string> PostgreSQLConfigBackend::listSection(const string& section) const
     return tags;
   }
   
+  std::string table_name = getFullTableName("config");
+  std::string sql = "SELECT tag FROM " + table_name + " WHERE section = $1 ORDER BY tag";
+  
   const char* params[1] = { section.c_str() };
   
   PGresult* result = PQexecParams(m_conn,
-                                  "SELECT tag FROM config WHERE section = $1 ORDER BY tag",
+                                  sql.c_str(),
                                   1,      // number of parameters
                                   nullptr, // parameter types (NULL = infer)
                                   params, // parameter values
@@ -312,6 +319,24 @@ std::string PostgreSQLConfigBackend::getBackendInfo(void) const
   return m_connection_info;
 } /* PostgreSQLConfigBackend::getBackendInfo */
 
+bool PostgreSQLConfigBackend::initializeTables(void)
+{
+  if (!isOpen())
+  {
+    cerr << "*** ERROR: Cannot initialize tables - database not open" << endl;
+    return false;
+  }
+  
+  // Create tables if they don't exist
+  if (!createTables())
+  {
+    cerr << "*** ERROR: Failed to create database tables" << endl;
+    return false;
+  }
+  
+  return true;
+} /* PostgreSQLConfigBackend::initializeTables */
+
 bool PostgreSQLConfigBackend::checkForExternalChanges(void)
 {
   if (!isOpen())
@@ -320,11 +345,14 @@ bool PostgreSQLConfigBackend::checkForExternalChanges(void)
   }
 
   // Query for all records updated since last check
+  std::string table_name = getFullTableName("config");
+  std::string sql = "SELECT section, tag, value, updated_at FROM " + table_name + " "
+                    "WHERE updated_at > $1 ORDER BY updated_at";
+  
   const char* params[1] = { m_last_check_time.c_str() };
   
   PGresult* result = PQexecParams(m_conn,
-                                  "SELECT section, tag, value, updated_at FROM config "
-                                  "WHERE updated_at > $1 ORDER BY updated_at",
+                                  sql.c_str(),
                                   1,      // number of parameters
                                   nullptr, // parameter types (NULL = infer)
                                   params, // parameter values
@@ -383,8 +411,10 @@ bool PostgreSQLConfigBackend::checkForExternalChanges(void)
 
 bool PostgreSQLConfigBackend::createTables(void)
 {
-  const char* create_table_sql = 
-    "CREATE TABLE IF NOT EXISTS config ("
+  std::string table_name = getFullTableName("config");
+  
+  std::string create_table_sql = 
+    "CREATE TABLE IF NOT EXISTS " + table_name + " ("
     "  id SERIAL PRIMARY KEY,"
     "  section VARCHAR(255) NOT NULL,"
     "  tag VARCHAR(255) NOT NULL,"
@@ -400,8 +430,8 @@ bool PostgreSQLConfigBackend::createTables(void)
   }
   
   // Create index for faster lookups
-  const char* create_index_sql = 
-    "CREATE INDEX IF NOT EXISTS idx_config_section ON config(section)";
+  std::string create_index_sql = 
+    "CREATE INDEX IF NOT EXISTS idx_" + table_name + "_section ON " + table_name + "(section)";
   
   if (!executeQuery(create_index_sql))
   {
@@ -423,10 +453,10 @@ bool PostgreSQLConfigBackend::createTables(void)
     return false;
   }
   
-  const char* create_trigger = 
-    "DROP TRIGGER IF EXISTS update_config_updated_at ON config; "
-    "CREATE TRIGGER update_config_updated_at "
-    "  BEFORE UPDATE ON config "
+  std::string create_trigger = 
+    "DROP TRIGGER IF EXISTS update_" + table_name + "_updated_at ON " + table_name + "; "
+    "CREATE TRIGGER update_" + table_name + "_updated_at "
+    "  BEFORE UPDATE ON " + table_name + " "
     "  FOR EACH ROW "
     "  EXECUTE FUNCTION update_updated_at_column()";
   

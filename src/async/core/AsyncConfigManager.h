@@ -128,6 +128,8 @@ class ConfigManager
     /**
      * @brief 	Initialize configuration backend from db.conf
      * @param 	config_dir The directory to search for db.conf
+     * @param 	default_config_file Default config filename to use if not specified in db.conf
+     * @param 	default_table_prefix Default table prefix based on binary name (e.g., "svxlink_")
      * @return	Returns a configured backend or nullptr on failure
      *
      * This function searches for db.conf in the following locations:
@@ -136,20 +138,26 @@ class ConfigManager
      * 3. /etc/svxlink/db.conf
      * 4. SVX_SYSCONF_INSTALL_DIR/db.conf
      * 
-     * If no db.conf is found, defaults to file backend with svxlink.conf
-     * in the same search locations.
+     * If no db.conf is found, defaults to file backend with the specified
+     * default_config_file in the same search locations.
      */
-    ConfigBackendPtr initializeBackend(const std::string& config_dir = "");
+    ConfigBackendPtr initializeBackend(const std::string& config_dir = "", 
+                                       const std::string& default_config_file = "svxlink.conf",
+                                       const std::string& default_table_prefix = "");
 
     /**
      * @brief 	Initialize configuration backend from specific db.conf file
      * @param 	db_conf_path The full path to the db.conf file to use
+     * @param 	default_config_file Default config filename to use if not specified in db.conf
+     * @param 	default_table_prefix Default table prefix based on binary name (e.g., "svxlink_")
      * @return	Returns a configured backend or nullptr on failure
      *
      * This function directly uses the specified db.conf file instead of searching
      * for it in standard locations.
      */
-    ConfigBackendPtr initializeBackendFromFile(const std::string& db_conf_path);
+    ConfigBackendPtr initializeBackendFromFile(const std::string& db_conf_path,
+                                                const std::string& default_config_file = "svxlink.conf",
+                                                const std::string& default_table_prefix = "");
 
     /**
      * @brief   Get the last error message
@@ -176,6 +184,7 @@ class ConfigManager
     {
       std::string type;
       std::string source;
+      std::string table_prefix;      // Optional: table prefix for DB isolation
       bool enable_change_notifications;
       unsigned int poll_interval_seconds;
       
@@ -184,8 +193,8 @@ class ConfigManager
 
     bool findAndParseDbConfig(const std::string& config_dir, DbConfig& config, std::string& db_conf_path);
     bool parseDbConfigFile(const std::string& file_path, DbConfig& config);
-    bool initializeDatabase(ConfigBackend* backend);
-    bool populateFromExistingFiles(ConfigBackend* backend);
+    bool initializeDatabase(ConfigBackend* backend, const std::string& default_config_file);
+    bool populateFromExistingFiles(ConfigBackend* backend, const std::string& config_file);
     void populateDefaultConfiguration(ConfigBackend* backend);
     std::string findConfigFile(const std::string& config_dir, const std::string& filename);
 

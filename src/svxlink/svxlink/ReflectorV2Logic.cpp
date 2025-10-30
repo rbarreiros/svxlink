@@ -1908,7 +1908,7 @@ bool ReflectorLogic::getConfigValue(const std::string& section,
 } /* ReflectorLogic::getConfigValue */
 
 
-void ReflectorLogic::cfgUpdated(const std::string& section, const std::string& tag)
+void ReflectorLogic::cfgUpdated(const std::string& section, const std::string& tag, const std::string& value)
 {
   if (section == name())
   {

@@ -273,7 +273,7 @@ class ModuleEchoLink : public Module
     bool setAcceptIncomingRegex(void);
     bool setRejectOutgoingRegex(void);
     bool setAcceptOutgoingRegex(void);
-    void cfgValueUpdated(const std::string& section, const std::string& tag);
+    void cfgValueUpdated(const std::string& section, const std::string& tag, const std::string& value);
 
 };  /* class ModuleEchoLink */
 

@@ -114,7 +114,9 @@ ConfigManager::~ConfigManager(void)
 {
 } /* ConfigManager::~ConfigManager */
 
-ConfigBackendPtr ConfigManager::initializeBackend(const std::string& config_dir)
+ConfigBackendPtr ConfigManager::initializeBackend(const std::string& config_dir,
+                                                   const std::string& default_config_file,
+                                                   const std::string& default_table_prefix)
 {
   m_last_error.clear();
   
@@ -124,13 +126,13 @@ ConfigBackendPtr ConfigManager::initializeBackend(const std::string& config_dir)
   string db_conf_path;
   if (!findAndParseDbConfig(config_dir, db_config, db_conf_path))
   {
-    // If no db.conf found, default to file backend with svxlink.conf
+    // If no db.conf found, default to file backend with the default config file
     cout << "No db.conf found, defaulting to file backend" << endl;
     
-    string config_file = findConfigFile(config_dir, "svxlink.conf");
+    string config_file = findConfigFile(config_dir, default_config_file);
     if (config_file.empty())
     {
-      m_last_error = "Neither db.conf nor svxlink.conf could be found in standard locations";
+      m_last_error = "Neither db.conf nor " + default_config_file + " could be found in standard locations";
       cerr << "*** ERROR: " << m_last_error << endl;
       return nullptr;
     }
@@ -141,6 +143,26 @@ ConfigBackendPtr ConfigManager::initializeBackend(const std::string& config_dir)
   }
   else
   {
+    // Always append binary name to table prefix for isolation
+    // If TABLE_PREFIX not set: use binary name (svxlink_, svxreflector_, etc.)
+    // If TABLE_PREFIX set (e.g., "prod_"): append binary name (prod_svxlink_, prod_svxreflector_, etc.)
+    if (!default_table_prefix.empty())
+    {
+      if (db_config.table_prefix.empty())
+      {
+        // No prefix in db.conf - use binary name as prefix
+        db_config.table_prefix = default_table_prefix;
+        cout << "Using automatic table prefix: " << db_config.table_prefix << endl;
+      }
+      else
+      {
+        // Prefix specified in db.conf - append binary name for isolation
+        db_config.table_prefix = db_config.table_prefix + default_table_prefix;
+        cout << "Using table prefix: " << db_config.table_prefix 
+             << " (from db.conf + binary name)" << endl;
+      }
+    }
+    
     // For CFG_DIR resolution, use the actual config source file if it's a file backend
     if (db_config.type == "file")
     {
@@ -184,6 +206,12 @@ ConfigBackendPtr ConfigManager::initializeBackend(const std::string& config_dir)
     return nullptr;
   }
   
+  // Set table prefix for database backends
+  if (!db_config.table_prefix.empty())
+  {
+    backend->setTablePrefix(db_config.table_prefix);
+  }
+  
   // Apply db.conf notification settings to the backend
   backend->enableChangeNotifications(db_config.enable_change_notifications);
   if (db_config.enable_change_notifications && db_config.poll_interval_seconds > 0)
@@ -198,7 +226,7 @@ ConfigBackendPtr ConfigManager::initializeBackend(const std::string& config_dir)
   // For database backends, check if initialization is needed
   if (backend->getBackendType() != "file")
   {
-    if (!initializeDatabase(backend.get()))
+    if (!initializeDatabase(backend.get(), default_config_file))
     {
       m_last_error = "Failed to initialize database backend";
       cerr << "*** ERROR: " << m_last_error << endl;
@@ -209,7 +237,9 @@ ConfigBackendPtr ConfigManager::initializeBackend(const std::string& config_dir)
   return backend;
 } /* ConfigManager::initializeBackend */
 
-ConfigBackendPtr ConfigManager::initializeBackendFromFile(const std::string& db_conf_path)
+ConfigBackendPtr ConfigManager::initializeBackendFromFile(const std::string& db_conf_path,
+                                                           const std::string& default_config_file,
+                                                           const std::string& default_table_prefix)
 {
   m_last_error.clear();
   
@@ -221,6 +251,26 @@ ConfigBackendPtr ConfigManager::initializeBackendFromFile(const std::string& db_
     m_last_error = "Could not parse database configuration file: " + db_conf_path;
     cerr << "*** ERROR: " << m_last_error << endl;
     return nullptr;
+  }
+  
+  // Always append binary name to table prefix for isolation
+  // If TABLE_PREFIX not set: use binary name (svxlink_, svxreflector_, etc.)
+  // If TABLE_PREFIX set (e.g., "prod_"): append binary name (prod_svxlink_, prod_svxreflector_, etc.)
+  if (!default_table_prefix.empty())
+  {
+    if (db_config.table_prefix.empty())
+    {
+      // No prefix in db.conf - use binary name as prefix
+      db_config.table_prefix = default_table_prefix;
+      cout << "Using automatic table prefix: " << db_config.table_prefix << endl;
+    }
+    else
+    {
+      // Prefix specified in db.conf - append binary name for isolation
+      db_config.table_prefix = db_config.table_prefix + default_table_prefix;
+      cout << "Using table prefix: " << db_config.table_prefix 
+           << " (from db.conf + binary name)" << endl;
+    }
   }
   
   // For CFG_DIR resolution, use the actual config source file if it's a file backend
@@ -265,6 +315,12 @@ ConfigBackendPtr ConfigManager::initializeBackendFromFile(const std::string& db_
     return nullptr;
   }
   
+  // Set table prefix for database backends
+  if (!db_config.table_prefix.empty())
+  {
+    backend->setTablePrefix(db_config.table_prefix);
+  }
+  
   // Apply db.conf notification settings to the backend
   backend->enableChangeNotifications(db_config.enable_change_notifications);
   if (db_config.enable_change_notifications && db_config.poll_interval_seconds > 0)
@@ -279,7 +335,7 @@ ConfigBackendPtr ConfigManager::initializeBackendFromFile(const std::string& db_
   // For database backends, check if initialization is needed
   if (backend->getBackendType() != "file")
   {
-    if (!initializeDatabase(backend.get()))
+    if (!initializeDatabase(backend.get(), default_config_file))
     {
       m_last_error = "Failed to initialize database backend";
       cerr << "*** ERROR: " << m_last_error << endl;
@@ -376,6 +432,10 @@ bool ConfigManager::parseDbConfigFile(const std::string& file_path, DbConfig& co
         {
           config.source = value;
         }
+        else if (key == "TABLE_PREFIX")
+        {
+          config.table_prefix = value;
+        }
         else if (key == "ENABLE_CHANGE_NOTIFICATIONS")
         {
           config.enable_change_notifications = (value == "1" || value == "true" || value == "TRUE" || value == "yes" || value == "YES");
@@ -396,14 +456,26 @@ bool ConfigManager::parseDbConfigFile(const std::string& file_path, DbConfig& co
     return false;
   }
   
-  cout << "Database configuration: TYPE=" << config.type << ", SOURCE=" << config.source << endl;
+  cout << "Database configuration: TYPE=" << config.type << ", SOURCE=" << config.source;
+  if (!config.table_prefix.empty())
+  {
+    cout << ", TABLE_PREFIX=" << config.table_prefix;
+  }
+  cout << endl;
   return true;
 } /* ConfigManager::parseDbConfigFile */
 
-bool ConfigManager::initializeDatabase(ConfigBackend* backend)
+bool ConfigManager::initializeDatabase(ConfigBackend* backend, const std::string& default_config_file)
 {
   if (backend == nullptr)
   {
+    return false;
+  }
+  
+  // Initialize database tables (this must be done after table prefix is set)
+  if (!backend->initializeTables())
+  {
+    cerr << "*** ERROR: Failed to initialize database tables" << endl;
     return false;
   }
   
@@ -433,7 +505,7 @@ bool ConfigManager::initializeDatabase(ConfigBackend* backend)
   }
   
   // Try to populate from existing file configuration first
-  if (populateFromExistingFiles(backend))
+  if (populateFromExistingFiles(backend, default_config_file))
   {
     cout << "Database initialized from existing configuration files" << endl;
   }
@@ -467,15 +539,15 @@ bool ConfigManager::initializeDatabase(ConfigBackend* backend)
   return true;
 } /* ConfigManager::initializeDatabase */
 
-bool ConfigManager::populateFromExistingFiles(ConfigBackend* backend)
+bool ConfigManager::populateFromExistingFiles(ConfigBackend* backend, const std::string& config_file_name)
 {
   if (backend == nullptr)
   {
     return false;
   }
   
-  // Look for existing svxlink.conf in standard locations
-  string config_file = findConfigFile("", "svxlink.conf");
+  // Look for existing config file in standard locations
+  string config_file = findConfigFile("", config_file_name);
   if (config_file.empty())
   {
     return false; // No existing configuration files found
