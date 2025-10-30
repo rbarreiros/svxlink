@@ -537,6 +537,7 @@ bool ReflectorLogic::initialize(Async::Config& cfgobj, const std::string& logic_
   prev_src = 0;
 
   cfg().getValue(name(), "DEFAULT_TG", m_default_tg);
+
   if (!cfg().getValue(name(), "TG_SELECT_TIMEOUT", 1U,
                       std::numeric_limits<unsigned>::max(),
                       m_tg_select_timeout, true))
@@ -547,7 +548,7 @@ bool ReflectorLogic::initialize(Async::Config& cfgobj, const std::string& logic_
     return false;
   }
 
-  m_tg_select_inhibit_timeout = m_tg_select_timeout;
+  m_tg_select_inhibit_timeout = (m_default_tg == 0) ? m_tg_select_timeout : 0;
   if (!cfg().getValue(name(), "TG_SELECT_INHIBIT_TIMEOUT", 0U,
                       std::numeric_limits<unsigned>::max(),
                       m_tg_select_inhibit_timeout, true))
@@ -982,7 +983,7 @@ ReflectorLogic::~ReflectorLogic(void)
 
 void ReflectorLogic::onConnected(void)
 {
-  std::cout << "NOTICE: " << name() << ": Connection established to "
+  std::cout << "NOTICE[" << name() << "]: Connected to "
             << m_con.remoteHost() << ":" << m_con.remotePort()
             << " (" << (m_con.isPrimary() ? "primary" : "secondary") << ")"
             << std::endl;
@@ -1128,10 +1129,11 @@ void ReflectorLogic::onFrameReceived(FramedTcpConnection*,
     return;
   }
 
-  if ((header.type() > 100) && !isTcpLoggedIn())
+  if ((header.type() >= 100) && (m_con_state < STATE_AUTHENTICATED))
   {
-    cerr << "*** ERROR[" << name() << "]: Unexpected protocol message received"
-         << endl;
+    std::cerr << "*** ERROR[" << name()
+              << "]: Unexpected protocol message received with type="
+              << header.type() << std::endl;
     disconnect();
     return;
   }
@@ -2092,7 +2094,7 @@ bool ReflectorLogic::udpCipherDataReceived(const IpAddress& addr, uint16_t port,
 void ReflectorLogic::udpDatagramReceived(const IpAddress& addr, uint16_t port,
                                          void* aad, void *buf, int count)
 {
-  if (!isTcpLoggedIn())
+  if (m_con_state < STATE_EXPECT_START_UDP_ENCRYPTION)
   {
     return;
   }
