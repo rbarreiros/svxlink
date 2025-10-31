@@ -414,6 +414,28 @@ int main(int argc, char **argv)
     }
   }
 
+  // Everything else requires a restart of svxlink to update the config
+  // we only hot update the location info
+  cfg.subscribeValue("GLOBAL", "LOCATION_INFO", value, [&cfg](const std::string& value) {
+      // Do we have a location info section already ?!!??!
+      if(LocationInfo::has_instance())
+      {
+        LocationInfo::deleteInstance();
+      }
+
+      if(value.empty())
+      {
+        return;
+      }
+      
+      if (!LocationInfo::initialize(cfg, value))
+      {
+        std::cerr << "*** ERROR: Could not initialize the location info "
+                  << "subsystem. Check configuration section [" << value << "]."
+                  << std::endl;
+      }
+  });
+
     // Init Logiclinking
   if (cfg.getValue("GLOBAL", "LINKS", value))
   {

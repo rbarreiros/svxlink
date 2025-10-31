@@ -144,11 +144,25 @@ bool SimplexLogic::initialize(Async::Config& cfgobj, const string& logic_name)
   cfg().getValue(name(), "MUTE_TX_ON_RX", mute_tx_on_rx);
   cfg().getValue(name(), "RGR_SOUND_ALWAYS", rgr_sound_always);
   
+  cfg().subscribeValue(name(), "MUTE_RX_ON_TX", mute_rx_on_tx, [&](bool value) {
+    mute_rx_on_tx = value;
+  });
+  cfg().subscribeValue(name(), "MUTE_TX_ON_RX", mute_tx_on_rx, [&](bool value) {
+    mute_tx_on_rx = value;
+  });
+  cfg().subscribeValue(name(), "RGR_SOUND_ALWAYS", rgr_sound_always, [&](bool value) {
+    rgr_sound_always = value;
+  });
+
   rxValveSetOpen(true);
   setTxCtrlMode(Tx::TX_AUTO);
   
   processEvent("startup");
   
+  // TODO -- Rui Barreiros
+  // Add a callback to update the TCL functions that use config values when they are updated 
+
+
   return true;
   
 } /* SimplexLogic::initialize */
