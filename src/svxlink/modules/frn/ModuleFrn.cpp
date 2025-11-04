@@ -233,6 +233,8 @@ bool ModuleFrn::initialize(void)
     return false;
   }
 
+  cfg().valueUpdated.connect(sigc::mem_fun(*this, &ModuleFrn::cfgUpdated));
+
   return true;
   
 } /* initialize */
@@ -492,6 +494,7 @@ void ModuleFrn::cfgUpdated(const std::string& section, const std::string& tag, c
   Module::cfgUpdated(section, tag, value);
   
   // Update QsoFrn configuration if this is our section
+  // This will probably require a restart.......
   if (section == cfgName() && qso != nullptr)
   {
     qso->updateConfig(cfg(), cfgName());

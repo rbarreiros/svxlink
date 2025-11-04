@@ -573,7 +573,7 @@ void ReflectorLogic::remoteCmdReceived(LogicBase* src_logic,
           }
           else
           {
-            std::cerr << "*** WARNING: Not allowed to add a temporary montior "
+            std::cerr << "*** WARNING: Not allowed to add a temporary monitor "
                          "for TG #" << tg << " which is being permanently "
                          "monitored" << std::endl;
             os << "command_failed " << cmd;
@@ -1912,16 +1912,24 @@ void ReflectorLogic::cfgUpdated(const std::string& section, const std::string& t
 {
   if (section == name())
   {
+    // Runtime-updatable boolean values
     if (tag == "MUTE_FIRST_TX_LOC")
     {
+      // TODO -- Rui Barreiros 
       cfg().getValue(name(), "MUTE_FIRST_TX_LOC", m_mute_first_tx_loc);
     }
     else if (tag == "MUTE_FIRST_TX_REM")
     {
+      // TODO -- Rui Barreiros 
       cfg().getValue(name(), "MUTE_FIRST_TX_REM", m_mute_first_tx_rem);
+    }
+    else if (tag == "VERBOSE")
+    {
+      cfg().getValue(name(), "VERBOSE", m_verbose);
     }
     else if (tag == "TMP_MONITOR_TIMEOUT")
     {
+      // Only updates on the next call to monitor tg, the current monitoring remains unchanged
       cfg().getValue(name(), "TMP_MONITOR_TIMEOUT", m_tmp_monitor_timeout);
     }
     else if (tag == "UDP_HEARTBEAT_INTERVAL")
@@ -1932,25 +1940,51 @@ void ReflectorLogic::cfgUpdated(const std::string& section, const std::string& t
     {
       cfg().getValue(name(), "DEFAULT_TG", m_default_tg);
     }
-    else if (tag == "VERBOSE")
+    else if (tag == "TG_SELECT_TIMEOUT")
     {
-      cfg().getValue(name(), "VERBOSE", m_verbose);
+      unsigned new_timeout;
+      if (cfg().getValue(name(), "TG_SELECT_TIMEOUT", 1U,
+                         std::numeric_limits<unsigned>::max(),
+                         new_timeout, true))
+      {
+        m_tg_select_timeout = new_timeout;
+        // Update current timeout counter if TG is selected
+        if (m_selected_tg > 0)
+        {
+          m_tg_select_timeout_cnt = m_tg_select_timeout;
+        }
+      }
+      else
+      {
+        std::cerr << "*** ERROR[" << name()
+                  << "]: Illegal value for TG_SELECT_TIMEOUT: " << value
+                  << std::endl;
+      }
     }
-    // Note: CALLSIGN changes would require reconnection, which is complex
-    // For now, just log a warning
-    else if (tag == "CALLSIGN")
+    else if (tag == "TG_SELECT_INHIBIT_TIMEOUT")
     {
-      std::cerr << "*** WARNING: CALLSIGN configuration change detected. "
-                << "Restart required for this change to take effect." << std::endl;
+      unsigned new_timeout;
+      if (cfg().getValue(name(), "TG_SELECT_INHIBIT_TIMEOUT", 0U,
+                         std::numeric_limits<unsigned>::max(),
+                         new_timeout, true))
+      {
+        m_tg_select_inhibit_timeout = new_timeout;
+      }
+      else
+      {
+        std::cerr << "*** ERROR[" << name()
+                  << "]: Illegal value for TG_SELECT_INHIBIT_TIMEOUT: " << value
+                  << std::endl;
+      }
     }
-    
-    // Update event handler variables for TCL scripts
-    std::string value;
-    if (cfg().getValue(name(), tag, value))
+    else if (tag == "QSY_PENDING_TIMEOUT")
     {
-      m_event_handler->setVariable(name() + "::Logic::CFG_" + tag, value);
-      m_event_handler->processEvent("config_updated CFG_" + tag + " \"" + value + "\"");
+      int qsy_pending_timeout = -1;
+      cfg().getValue(name(), "QSY_PENDING_TIMEOUT", qsy_pending_timeout);
+      m_qsy_pending_timer.setTimeout(
+        (qsy_pending_timeout > 0) ? (1000 * qsy_pending_timeout) : -1);
     }
+    // Anything else requires a restart.....
   }
 } /* ReflectorLogic::cfgUpdated */
 

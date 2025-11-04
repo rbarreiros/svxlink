@@ -2796,21 +2796,51 @@ void ReflectorLogic::cfgUpdated(const std::string& section, const std::string& t
     {
       cfg().getValue(name(), "VERBOSE", m_verbose);
     }
-    // Note: CALLSIGN changes would require reconnection, which is complex
-    // For now, just log a warning
-    else if (tag == "CALLSIGN")
+    else if (tag == "TG_SELECT_TIMEOUT")
     {
-      std::cerr << "*** WARNING: CALLSIGN configuration change detected. "
-                << "Restart required for this change to take effect." << std::endl;
+      unsigned new_timeout;
+      if (cfg().getValue(name(), "TG_SELECT_TIMEOUT", 1U,
+                         std::numeric_limits<unsigned>::max(),
+                         new_timeout, true))
+      {
+        m_tg_select_timeout = new_timeout;
+        // Update current timeout counter if TG is selected
+        if (m_selected_tg > 0)
+        {
+          m_tg_select_timeout_cnt = m_tg_select_timeout;
+        }
+      }
+      else
+      {
+        std::cerr << "*** ERROR[" << name()
+                  << "]: Illegal value for TG_SELECT_TIMEOUT: " << value
+                  << std::endl;
+      }
+    }
+    else if (tag == "TG_SELECT_INHIBIT_TIMEOUT")
+    {
+      unsigned new_timeout;
+      if (cfg().getValue(name(), "TG_SELECT_INHIBIT_TIMEOUT", 0U,
+                         std::numeric_limits<unsigned>::max(),
+                         new_timeout, true))
+      {
+        m_tg_select_inhibit_timeout = new_timeout;
+      }
+      else
+      {
+        std::cerr << "*** ERROR[" << name()
+                  << "]: Illegal value for TG_SELECT_INHIBIT_TIMEOUT: " << value
+                  << std::endl;
+      }
+    }
+    else if (tag == "QSY_PENDING_TIMEOUT")
+    {
+      int qsy_pending_timeout = -1;
+      cfg().getValue(name(), "QSY_PENDING_TIMEOUT", qsy_pending_timeout);
+      m_qsy_pending_timer.setTimeout(
+        (qsy_pending_timeout > 0) ? (1000 * qsy_pending_timeout) : -1);
     }
     
-    // Update event handler variables for TCL scripts
-    std::string value;
-    if (cfg().getValue(name(), tag, value))
-    {
-      m_event_handler->setVariable(name() + "::Logic::CFG_" + tag, value);
-      m_event_handler->processEvent("config_updated CFG_" + tag + " \"" + value + "\"");
-    }
   }
 } /* ReflectorLogic::cfgUpdated */
 
