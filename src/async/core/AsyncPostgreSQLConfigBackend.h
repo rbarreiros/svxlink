@@ -218,6 +218,12 @@ class PostgreSQLConfigBackend : public ConfigBackend
      */
     virtual bool initializeTables(void) override;
 
+    /**
+     * @brief Finalize database initialization after tables are populated
+     * @return true on success, false on failure
+     */
+    virtual bool finalizeInitialization(void) override;
+
   protected:
 
   private:
@@ -232,6 +238,7 @@ class PostgreSQLConfigBackend : public ConfigBackend
     std::string escapeString(const std::string& str) const;
     std::string getLastError(void) const;
     void parseConnectionInfo(const std::string& conn_str);
+    void initializeLastCheckTime(void);
 
 }; /* class PostgreSQLConfigBackend */
 

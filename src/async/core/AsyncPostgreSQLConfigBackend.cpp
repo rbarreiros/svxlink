@@ -334,8 +334,27 @@ bool PostgreSQLConfigBackend::initializeTables(void)
     return false;
   }
   
+  // Note: initializeLastCheckTime() is now called from finalizeInitialization()
+  // after tables are populated, not here when tables are empty
+  
   return true;
 } /* PostgreSQLConfigBackend::initializeTables */
+
+bool PostgreSQLConfigBackend::finalizeInitialization(void)
+{
+  if (!isOpen())
+  {
+    cerr << "*** ERROR: Cannot finalize initialization - database not open" << endl;
+    return false;
+  }
+  
+  // Initialize m_last_check_time to the most recent updated_at in the database
+  // This prevents detecting all existing records as "changes" on first poll
+  // This must be called AFTER tables are populated with data
+  initializeLastCheckTime();
+  
+  return true;
+} /* PostgreSQLConfigBackend::finalizeInitialization */
 
 bool PostgreSQLConfigBackend::checkForExternalChanges(void)
 {
@@ -565,6 +584,49 @@ void PostgreSQLConfigBackend::parseConnectionInfo(const std::string& conn_str)
   
   m_connection_info = sanitized.str();
 } /* PostgreSQLConfigBackend::parseConnectionInfo */
+
+void PostgreSQLConfigBackend::initializeLastCheckTime(void)
+{
+  if (!isOpen())
+  {
+    return;
+  }
+
+  // Query for the most recent updated_at timestamp in the database
+  std::string table_name = getFullTableName("config");
+  std::string sql = "SELECT MAX(updated_at) FROM " + table_name;
+
+  PGresult* result = PQexec(m_conn, sql.c_str());
+  
+  if (PQresultStatus(result) != PGRES_TUPLES_OK)
+  {
+    cerr << "*** WARNING: Failed to query max updated_at: " << PQerrorMessage(m_conn) << endl;
+    PQclear(result);
+    return;
+  }
+
+  int nrows = PQntuples(result);
+  if (nrows > 0)
+  {
+    char* max_timestamp = PQgetvalue(result, 0, 0);
+    if (max_timestamp != nullptr && max_timestamp[0] != '\0')
+    {
+      m_last_check_time = std::string(max_timestamp);
+    }
+    else
+    {
+      // Database is empty or all updated_at are NULL
+      m_last_check_time = "1970-01-01 00:00:00";
+    }
+  }
+  else
+  {
+    // No rows returned
+    m_last_check_time = "1970-01-01 00:00:00";
+  }
+
+  PQclear(result);
+} /* PostgreSQLConfigBackend::initializeLastCheckTime */
 
 /*
  * This file has not been truncated

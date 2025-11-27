@@ -161,67 +161,41 @@ bool Config::open(const string& config_dir)
   // - For database backend: use the db.conf location
   m_main_config_file = manager.getMainConfigReference();
 
-  // Disable notifications during initial config load to avoid spurious signals
-  bool was_enabled = m_backend->changeNotificationsEnabled();
-  if (was_enabled)
-  {
-    m_backend->enableChangeNotifications(false);
-  }
-
-  // Load all configuration data into memory for subscription support
-  loadFromBackend();
-
-  // Re-enable notifications before connecting signals
-  if (was_enabled)
-  {
-    m_backend->enableChangeNotifications(true);
-  }
-
-  // Connect backend signals for external change detection
-  connectBackendSignals();
-
+  finalizeBackendSetup();
   return true;
 } /* Config::open */
 
 bool Config::openFromDbConfig(const string& db_conf_path)
 {
-  // Extract the default config file name from db_conf_path or use svxlink.conf
-  // This maintains backward compatibility
+  return openFromDbConfigInternal(db_conf_path, "svxlink.conf", "svxlink_", true);
+} /* Config::openFromDbConfig */
+
+bool Config::openFromDbConfigInternal(const std::string& db_conf_path,
+                                       const std::string& default_config_name,
+                                       const std::string& default_table_prefix,
+                                       bool abort_on_failure)
+{
   ConfigManager manager;
 
-  // Initialize backend using specific db.conf file with default config file name and table prefix
-  m_backend = manager.initializeBackendFromFile(db_conf_path, "svxlink.conf", "svxlink_");
+  // Initialize backend using specific db.conf file
+  m_backend = manager.initializeBackendFromFile(db_conf_path, default_config_name, default_table_prefix);
   if (m_backend == nullptr)
   {
-    cerr << "*** FATAL ERROR: " << manager.getLastError() << endl;
-    cerr << "*** APPLICATION ABORTING: Cannot initialize configuration backend from " << db_conf_path << endl;
-    exit(1);  // Abort application as requested
+    if (abort_on_failure)
+    {
+      cerr << "*** FATAL ERROR: " << manager.getLastError() << endl;
+      cerr << "*** APPLICATION ABORTING: Cannot initialize configuration backend from " << db_conf_path << endl;
+      exit(1);
+    }
+    return false;
   }
 
   // For CFG_DIR resolution, use the db.conf location as reference
   m_main_config_file = manager.getMainConfigReference();
 
-  // Disable notifications during initial config load to avoid spurious signals
-  bool was_enabled = m_backend->changeNotificationsEnabled();
-  if (was_enabled)
-  {
-    m_backend->enableChangeNotifications(false);
-  }
-
-  // Load all configuration data into memory for subscription support
-  loadFromBackend();
-
-  // Re-enable notifications before connecting signals
-  if (was_enabled)
-  {
-    m_backend->enableChangeNotifications(true);
-  }
-
-  // Connect backend signals for external change detection
-  connectBackendSignals();
-
+  finalizeBackendSetup();
   return true;
-} /* Config::openFromDbConfig */
+} /* Config::openFromDbConfigInternal */
 
 bool Config::openDirect(const string& source)
 {
@@ -246,25 +220,7 @@ bool Config::openDirect(const string& source)
   cout << "Using " << m_backend->getBackendType() << " configuration backend: " 
        << m_backend->getBackendInfo() << endl;
 
-  // Disable notifications during initial config load to avoid spurious signals
-  bool was_enabled = m_backend->changeNotificationsEnabled();
-  if (was_enabled)
-  {
-    m_backend->enableChangeNotifications(false);
-  }
-
-  // Load all configuration data into memory for subscription support
-  loadFromBackend();
-
-  // Re-enable notifications before connecting signals
-  if (was_enabled)
-  {
-    m_backend->enableChangeNotifications(true);
-  }
-
-  // Connect backend signals for external change detection
-  connectBackendSignals();
-
+  finalizeBackendSetup();
   return true;
 } /* Config::openDirect */
 
@@ -591,6 +547,33 @@ void Config::connectBackendSignals(void)
   }
 } /* Config::connectBackendSignals */
 
+void Config::finalizeBackendSetup(void)
+{
+  if (m_backend == nullptr)
+  {
+    return;
+  }
+
+  // Disable notifications during initial config load to avoid spurious signals
+  bool was_enabled = m_backend->changeNotificationsEnabled();
+  if (was_enabled)
+  {
+    m_backend->enableChangeNotifications(false);
+  }
+
+  // Load all configuration data into memory for subscription support
+  loadFromBackend();
+
+  // Re-enable notifications before connecting signals
+  if (was_enabled)
+  {
+    m_backend->enableChangeNotifications(true);
+  }
+
+  // Connect backend signals for external change detection
+  connectBackendSignals();
+} /* Config::finalizeBackendSetup */
+
 Config::ConfigLoadResult Config::openWithFallback(const std::string& cmdline_config,
                                                    const std::string& cmdline_dbconfig,
                                                    const std::string& default_config_name)
@@ -633,38 +616,20 @@ Config::ConfigLoadResult Config::openWithFallback(const std::string& cmdline_con
   // Priority 2: --dbconfig option
   if (!cmdline_dbconfig.empty())
   {
-    ConfigManager manager;
-    m_backend = manager.initializeBackendFromFile(cmdline_dbconfig, default_config_name, default_table_prefix);
-    if (m_backend == nullptr)
+    if (openFromDbConfigInternal(cmdline_dbconfig, default_config_name, default_table_prefix, false))
     {
-      result.error_message = "Failed to open database configuration: " + cmdline_dbconfig + " - " + manager.getLastError();
+      result.success = true;
+      result.source_type = "command_line";
+      result.source_path = cmdline_dbconfig;
+      result.backend_type = getBackendType();
+      result.used_dbconfig = true;
       return result;
     }
-    
-    m_main_config_file = manager.getMainConfigReference();
-    
-    // Disable notifications during initial config load
-    bool was_enabled = m_backend->changeNotificationsEnabled();
-    if (was_enabled)
+    else
     {
-      m_backend->enableChangeNotifications(false);
+      result.error_message = "Failed to open database configuration: " + cmdline_dbconfig;
+      return result;
     }
-    
-    loadFromBackend();
-    
-    if (was_enabled)
-    {
-      m_backend->enableChangeNotifications(true);
-    }
-    
-    connectBackendSignals();
-    
-    result.success = true;
-    result.source_type = "command_line";
-    result.source_path = cmdline_dbconfig;
-    result.backend_type = getBackendType();
-    result.used_dbconfig = true;
-    return result;
   }
 
   // Priority 3: Search for db.conf in standard locations
@@ -679,39 +644,20 @@ Config::ConfigLoadResult Config::openWithFallback(const std::string& cmdline_con
     struct stat st;
     if (stat(db_conf_path.c_str(), &st) == 0)
     {
-      // Use default config name and table prefix
-      ConfigManager manager;
-      m_backend = manager.initializeBackendFromFile(db_conf_path, default_config_name, default_table_prefix);
-      if (m_backend == nullptr)
+      if (openFromDbConfigInternal(db_conf_path, default_config_name, default_table_prefix, false))
       {
-        result.error_message = "Found db.conf at " + db_conf_path + " but failed to load it: " + manager.getLastError();
+        result.success = true;
+        result.source_type = "dbconfig";
+        result.source_path = db_conf_path;
+        result.backend_type = getBackendType();
+        result.used_dbconfig = true;
         return result;
       }
-      
-      m_main_config_file = manager.getMainConfigReference();
-      
-      // Disable notifications during initial config load
-      bool was_enabled = m_backend->changeNotificationsEnabled();
-      if (was_enabled)
+      else
       {
-        m_backend->enableChangeNotifications(false);
+        result.error_message = "Found db.conf at " + db_conf_path + " but failed to load it";
+        return result;
       }
-      
-      loadFromBackend();
-      
-      if (was_enabled)
-      {
-        m_backend->enableChangeNotifications(true);
-      }
-      
-      connectBackendSignals();
-      
-      result.success = true;
-      result.source_type = "dbconfig";
-      result.source_path = db_conf_path;
-      result.backend_type = getBackendType();
-      result.used_dbconfig = true;
-      return result;
     }
   }
 

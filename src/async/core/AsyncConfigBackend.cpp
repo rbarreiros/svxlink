@@ -88,13 +88,13 @@ void ConfigBackend::startAutoPolling(unsigned int interval_ms)
     return;
   }
 
+  // Always make sure the cleanup is done first!!
+  stopAutoPolling();
+
   std::cout << "Starting auto-polling with interval: " 
     << interval_ms << " milliseconds" << std::endl;
 
   m_current_poll_interval = interval_ms;
-  // Always make sure the cleanup is done first!!
-  stopAutoPolling();
-  
   m_poll_timer = new Async::Timer(interval_ms, Async::Timer::TYPE_PERIODIC, true);
   m_poll_timer->expired.connect(sigc::mem_fun(*this, &ConfigBackend::onPollTimer));
 }

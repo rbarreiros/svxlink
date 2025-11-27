@@ -359,8 +359,27 @@ bool MySQLConfigBackend::initializeTables(void)
     return false;
   }
   
+  // Note: initializeLastCheckTime() is now called from finalizeInitialization()
+  // after tables are populated, not here when tables are empty
+  
   return true;
 } /* MySQLConfigBackend::initializeTables */
+
+bool MySQLConfigBackend::finalizeInitialization(void)
+{
+  if (!isOpen())
+  {
+    cerr << "*** ERROR: Cannot finalize initialization - database not open" << endl;
+    return false;
+  }
+  
+  // Initialize m_last_check_time to the most recent updated_at in the database
+  // This prevents detecting all existing records as "changes" on first poll
+  // This must be called AFTER tables are populated with data
+  initializeLastCheckTime();
+  
+  return true;
+} /* MySQLConfigBackend::finalizeInitialization */
 
 bool MySQLConfigBackend::checkForExternalChanges(void)
 {
@@ -524,6 +543,45 @@ std::string MySQLConfigBackend::getLastError(void) const
   }
   return "MySQL connection not initialized";
 } /* MySQLConfigBackend::getLastError */
+
+void MySQLConfigBackend::initializeLastCheckTime(void)
+{
+  if (!isOpen())
+  {
+    return;
+  }
+
+  // Query for the most recent updated_at timestamp in the database
+  std::string table_name = getFullTableName("config");
+  std::ostringstream query;
+  query << "SELECT MAX(updated_at) FROM " << table_name;
+
+  if (mysql_query(m_mysql, query.str().c_str()) != 0)
+  {
+    cerr << "*** WARNING: Failed to query max updated_at: " << getLastError() << endl;
+    return;
+  }
+
+  MYSQL_RES* result = mysql_store_result(m_mysql);
+  if (result == nullptr)
+  {
+    cerr << "*** WARNING: Failed to store result: " << getLastError() << endl;
+    return;
+  }
+
+  MYSQL_ROW row = mysql_fetch_row(result);
+  if (row != nullptr && row[0] != nullptr)
+  {
+    m_last_check_time = std::string(row[0]);
+  }
+  else
+  {
+    // Database is empty or all updated_at are NULL
+    m_last_check_time = "1970-01-01 00:00:00";
+  }
+
+  mysql_free_result(result);
+} /* MySQLConfigBackend::initializeLastCheckTime */
 
 /*
  * This file has not been truncated

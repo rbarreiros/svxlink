@@ -217,6 +217,12 @@ class MySQLConfigBackend : public ConfigBackend
      */
     virtual bool initializeTables(void) override;
 
+    /**
+     * @brief Finalize database initialization after tables are populated
+     * @return true on success, false on failure
+     */
+    virtual bool finalizeInitialization(void) override;
+
   protected:
 
   private:
@@ -238,6 +244,7 @@ class MySQLConfigBackend : public ConfigBackend
     bool createTables(void);
     std::string escapeString(const std::string& str) const;
     std::string getLastError(void) const;
+    void initializeLastCheckTime(void);
 
 }; /* class MySQLConfigBackend */
 

@@ -193,6 +193,9 @@ class ConfigManager
 
     bool findAndParseDbConfig(const std::string& config_dir, DbConfig& config, std::string& db_conf_path);
     bool parseDbConfigFile(const std::string& file_path, DbConfig& config);
+    void applyTablePrefix(DbConfig& config, const std::string& default_table_prefix);
+    ConfigBackendPtr createAndConfigureBackend(const DbConfig& db_config,
+                                               const std::string& default_config_file);
     bool initializeDatabase(ConfigBackend* backend, const std::string& default_config_file);
     bool populateFromExistingFiles(ConfigBackend* backend, const std::string& config_file);
     void populateDefaultConfiguration(ConfigBackend* backend);

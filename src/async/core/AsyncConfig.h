@@ -858,6 +858,11 @@ class Config
     void syncToBackend(const std::string& section, const std::string& tag);
     void onBackendValueChanged(const std::string& section, const std::string& tag, const std::string& value);
     void connectBackendSignals(void);
+    void finalizeBackendSetup(void);
+    bool openFromDbConfigInternal(const std::string& db_conf_path,
+                                  const std::string& default_config_name,
+                                  const std::string& default_table_prefix,
+                                  bool abort_on_failure);
 
     template <class T>
     bool setValueFromString(T& val, const std::string &str) const

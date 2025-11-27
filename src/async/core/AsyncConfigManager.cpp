@@ -121,9 +121,9 @@ ConfigBackendPtr ConfigManager::initializeBackend(const std::string& config_dir,
   m_last_error.clear();
   
   DbConfig db_config;
+  string db_conf_path;
   
   // Try to find and parse db.conf
-  string db_conf_path;
   if (!findAndParseDbConfig(config_dir, db_config, db_conf_path))
   {
     // If no db.conf found, default to file backend with the default config file
@@ -140,103 +140,25 @@ ConfigBackendPtr ConfigManager::initializeBackend(const std::string& config_dir,
     db_config.type = "file";
     db_config.source = config_file;
     m_main_config_reference = config_file; // For file backend, use the config file itself
+    
+    // Skip table prefix for file backend fallback
   }
   else
   {
-    // Always append binary name to table prefix for isolation
-    // If TABLE_PREFIX not set: use binary name (svxlink_, svxreflector_, etc.)
-    // If TABLE_PREFIX set (e.g., "prod_"): append binary name (prod_svxlink_, prod_svxreflector_, etc.)
-    if (!default_table_prefix.empty())
-    {
-      if (db_config.table_prefix.empty())
-      {
-        // No prefix in db.conf - use binary name as prefix
-        db_config.table_prefix = default_table_prefix;
-        cout << "Using automatic table prefix: " << db_config.table_prefix << endl;
-      }
-      else
-      {
-        // Prefix specified in db.conf - append binary name for isolation
-        db_config.table_prefix = db_config.table_prefix + default_table_prefix;
-        cout << "Using table prefix: " << db_config.table_prefix 
-             << " (from db.conf + binary name)" << endl;
-      }
-    }
+    applyTablePrefix(db_config, default_table_prefix);
     
-    // For CFG_DIR resolution, use the actual config source file if it's a file backend
+    // Set main config reference for CFG_DIR resolution
     if (db_config.type == "file")
     {
-      m_main_config_reference = db_config.source; // Use the actual config file
+      m_main_config_reference = db_config.source;
     }
     else
     {
-      m_main_config_reference = db_conf_path; // Use db.conf location for database backends
+      m_main_config_reference = db_conf_path;
     }
   }
   
-  // Check if the requested backend type is available
-  if (!ConfigSource::isBackendAvailable(db_config.type))
-  {
-    m_last_error = "Backend '" + db_config.type + "' is not available (not compiled in)";
-    cerr << "*** ERROR: " << m_last_error << endl;
-    cerr << "Available backends: " << ConfigSource::availableBackendsString() << endl;
-    return nullptr;
-  }
-  
-  // Create the backend
-  string source_url;
-  if (db_config.type == "file")
-  {
-    source_url = db_config.source;
-  }
-  else if (db_config.type == "sqlite")
-  {
-    source_url = "sqlite://" + db_config.source;
-  }
-  else
-  {
-    source_url = db_config.source; // Already includes protocol for mysql/postgresql
-  }
-  
-  ConfigBackendPtr backend = createConfigBackend(source_url);
-  if (backend == nullptr)
-  {
-    m_last_error = "Failed to create " + db_config.type + " backend";
-    cerr << "*** ERROR: " << m_last_error << endl;
-    return nullptr;
-  }
-  
-  // Set table prefix for database backends
-  if (!db_config.table_prefix.empty())
-  {
-    backend->setTablePrefix(db_config.table_prefix);
-  }
-  
-  // For database backends, check if initialization is needed
-  if (backend->getBackendType() != "file")
-  {
-    if (!initializeDatabase(backend.get(), default_config_file))
-    {
-      m_last_error = "Failed to initialize database backend";
-      cerr << "*** ERROR: " << m_last_error << endl;
-      return nullptr;
-    }
-  }
-
-  // Apply db.conf notification settings to the backend
-  // This probably makes using the constructor args in AsyncConfigBackend pointless.....
-  backend->enableChangeNotifications(db_config.enable_change_notifications);
-  if (db_config.enable_change_notifications && db_config.poll_interval_seconds > 0)
-  {
-    backend->startAutoPolling(db_config.poll_interval_seconds * 1000); // Convert to milliseconds
-    cout << "Auto-polling enabled with interval: " << db_config.poll_interval_seconds << " seconds" << endl;
-  }
-  
-  cout << "Successfully initialized " << backend->getBackendType() 
-       << " configuration backend: " << backend->getBackendInfo() << endl;
-  
-  
-  return backend;
+  return createAndConfigureBackend(db_config, default_config_file);
 } /* ConfigManager::initializeBackend */
 
 ConfigBackendPtr ConfigManager::initializeBackendFromFile(const std::string& db_conf_path,
@@ -255,96 +177,19 @@ ConfigBackendPtr ConfigManager::initializeBackendFromFile(const std::string& db_
     return nullptr;
   }
   
-  // Always append binary name to table prefix for isolation
-  // If TABLE_PREFIX not set: use binary name (svxlink_, svxreflector_, etc.)
-  // If TABLE_PREFIX set (e.g., "prod_"): append binary name (prod_svxlink_, prod_svxreflector_, etc.)
-  if (!default_table_prefix.empty())
-  {
-    if (db_config.table_prefix.empty())
-    {
-      // No prefix in db.conf - use binary name as prefix
-      db_config.table_prefix = default_table_prefix;
-      cout << "Using automatic table prefix: " << db_config.table_prefix << endl;
-    }
-    else
-    {
-      // Prefix specified in db.conf - append binary name for isolation
-      db_config.table_prefix = db_config.table_prefix + default_table_prefix;
-      cout << "Using table prefix: " << db_config.table_prefix 
-           << " (from db.conf + binary name)" << endl;
-    }
-  }
+  applyTablePrefix(db_config, default_table_prefix);
   
-  // For CFG_DIR resolution, use the actual config source file if it's a file backend
+  // Set main config reference for CFG_DIR resolution
   if (db_config.type == "file")
   {
-    m_main_config_reference = db_config.source; // Use the actual config file
+    m_main_config_reference = db_config.source;
   }
   else
   {
-    m_main_config_reference = db_conf_path; // Use db.conf location for database backends
+    m_main_config_reference = db_conf_path;
   }
   
-  // Check if the requested backend type is available
-  if (!ConfigSource::isBackendAvailable(db_config.type))
-  {
-    m_last_error = "Backend '" + db_config.type + "' is not available (not compiled in)";
-    cerr << "*** ERROR: " << m_last_error << endl;
-    cerr << "Available backends: " << ConfigSource::availableBackendsString() << endl;
-    return nullptr;
-  }
-  
-  // Create the backend
-  string source_url;
-  if (db_config.type == "file")
-  {
-    source_url = db_config.source;
-  }
-  else if (db_config.type == "sqlite")
-  {
-    source_url = "sqlite://" + db_config.source;
-  }
-  else
-  {
-    source_url = db_config.source; // Already includes protocol for mysql/postgresql
-  }
-  
-  ConfigBackendPtr backend = createConfigBackend(source_url);
-  if (backend == nullptr)
-  {
-    m_last_error = "Failed to create " + db_config.type + " backend";
-    cerr << "*** ERROR: " << m_last_error << endl;
-    return nullptr;
-  }
-  
-  // Set table prefix for database backends
-  if (!db_config.table_prefix.empty())
-  {
-    backend->setTablePrefix(db_config.table_prefix);
-  }
-
-  // For database backends, check if initialization is needed
-  if (backend->getBackendType() != "file") {
-    if (!initializeDatabase(backend.get(), default_config_file)) {
-      m_last_error = "Failed to initialize database backend";
-      cerr << "*** ERROR: " << m_last_error << endl;
-      return nullptr;
-    }
-  }
-
-  // Apply db.conf notification settings to the backend
-  // This probably makes using the constructor args in AsyncConfigBackend pointless.....
-  backend->enableChangeNotifications(db_config.enable_change_notifications);
-  if (db_config.enable_change_notifications && db_config.poll_interval_seconds > 0)
-  {
-    backend->startAutoPolling(db_config.poll_interval_seconds * 1000); // Convert to milliseconds
-    cout << "Auto-polling enabled with interval: " << db_config.poll_interval_seconds << " seconds" << endl;
-  }
-  
-  cout << "Successfully initialized " << backend->getBackendType() 
-       << " configuration backend: " << backend->getBackendInfo() << endl;
-  
-  return backend;
+  return createAndConfigureBackend(db_config, default_config_file);
 } /* ConfigManager::initializeBackendFromFile */
 
 /****************************************************************************
@@ -466,6 +311,97 @@ bool ConfigManager::parseDbConfigFile(const std::string& file_path, DbConfig& co
   return true;
 } /* ConfigManager::parseDbConfigFile */
 
+void ConfigManager::applyTablePrefix(DbConfig& config, const std::string& default_table_prefix)
+{
+  // Always append binary name to table prefix for isolation
+  // If TABLE_PREFIX not set: use binary name (svxlink_, svxreflector_, etc.)
+  // If TABLE_PREFIX set (e.g., "prod_"): append binary name (prod_svxlink_, prod_svxreflector_, etc.)
+  if (default_table_prefix.empty())
+  {
+    return;
+  }
+  
+  if (config.table_prefix.empty())
+  {
+    // No prefix in db.conf - use binary name as prefix
+    config.table_prefix = default_table_prefix;
+    cout << "Using automatic table prefix: " << config.table_prefix << endl;
+  }
+  else
+  {
+    // Prefix specified in db.conf - append binary name for isolation
+    config.table_prefix = config.table_prefix + default_table_prefix;
+    cout << "Using table prefix: " << config.table_prefix 
+         << " (from db.conf + binary name)" << endl;
+  }
+} /* ConfigManager::applyTablePrefix */
+
+ConfigBackendPtr ConfigManager::createAndConfigureBackend(const DbConfig& db_config,
+                                                          const std::string& default_config_file)
+{
+  // Check if the requested backend type is available
+  if (!ConfigSource::isBackendAvailable(db_config.type))
+  {
+    m_last_error = "Backend '" + db_config.type + "' is not available (not compiled in)";
+    cerr << "*** ERROR: " << m_last_error << endl;
+    cerr << "Available backends: " << ConfigSource::availableBackendsString() << endl;
+    return nullptr;
+  }
+  
+  // Build source URL based on backend type
+  string source_url;
+  if (db_config.type == "file")
+  {
+    source_url = db_config.source;
+  }
+  else if (db_config.type == "sqlite")
+  {
+    source_url = "sqlite://" + db_config.source;
+  }
+  else
+  {
+    source_url = db_config.source; // Already includes protocol for mysql/postgresql
+  }
+  
+  // Create the backend
+  ConfigBackendPtr backend = createConfigBackend(source_url);
+  if (backend == nullptr)
+  {
+    m_last_error = "Failed to create " + db_config.type + " backend";
+    cerr << "*** ERROR: " << m_last_error << endl;
+    return nullptr;
+  }
+  
+  // Set table prefix for database backends
+  if (!db_config.table_prefix.empty())
+  {
+    backend->setTablePrefix(db_config.table_prefix);
+  }
+  
+  // For database backends, check if initialization is needed
+  if (backend->getBackendType() != "file")
+  {
+    if (!initializeDatabase(backend.get(), default_config_file))
+    {
+      m_last_error = "Failed to initialize database backend";
+      cerr << "*** ERROR: " << m_last_error << endl;
+      return nullptr;
+    }
+  }
+  
+  // Apply notification settings from db.conf
+  backend->enableChangeNotifications(db_config.enable_change_notifications);
+  if (db_config.enable_change_notifications && db_config.poll_interval_seconds > 0)
+  {
+    backend->startAutoPolling(db_config.poll_interval_seconds * 1000); // Convert to milliseconds
+    cout << "Auto-polling enabled with interval: " << db_config.poll_interval_seconds << " seconds" << endl;
+  }
+  
+  cout << "Successfully initialized " << backend->getBackendType() 
+       << " configuration backend: " << backend->getBackendInfo() << endl;
+  
+  return backend;
+} /* ConfigManager::createAndConfigureBackend */
 
 // This should be called before the polling is started....
 bool ConfigManager::initializeDatabase(ConfigBackend* backend, const std::string& default_config_file)
