@@ -658,6 +658,40 @@ class Config
     } /* subscribeValue */
 
     /**
+     * @brief Subscribe to an optional configuration variable (no auto-create)
+     * @param section The name of the section where the configuration
+     *                variable is located
+     * @param tag     The name of the configuration variable to get
+     * @param func    The function to call when the config var changes
+     *
+     * This function is used to subscribe to the changes of the specified
+     * configuration variable. Unlike subscribeValue, this function does NOT
+     * create the variable if it doesn't exist.
+     *
+     * - If the variable exists: the callback is called immediately with the value
+     * - If the variable doesn't exist: no callback is made initially
+     * - When the variable is added later: the callback is triggered
+     *
+     * This is useful for optional configuration values that should not be
+     * auto-created when missing.
+     */
+    template <typename F=std::function<void(const std::string&)>>
+    void subscribeOptionalValue(const std::string& section, const std::string& tag, F func)
+    {
+      Value& v = m_sections[section][tag];
+      v.subs.push_back(
+          [=](const std::string& str_val) -> void
+          {
+            func(str_val);
+          });
+      // Only call the callback if the value actually exists (non-empty)
+      if (!v.val.empty())
+      {
+        v.subs.back()(v.val);
+      }
+    } /* subscribeOptionalValue */
+
+    /**
      * @brief Subscribe to the given configuration variable (sequence)
      * @param section The name of the section where the configuration
      *                variable is located

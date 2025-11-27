@@ -419,7 +419,8 @@ int main(int argc, char **argv)
   /*
   BUG HERE, it reinserts the location info section every time the config is loaded and doesn't exist
   worse, it inserts with the wrong value
-  cfg.subscribeValue("GLOBAL", "LOCATION_INFO", value, [&cfg](const std::string& value) {
+  */
+  cfg.subscribeOptionalValue("GLOBAL", "LOCATION_INFO", [&cfg](const std::string& value) {
       // Do we have a location info section already ?!!??!
       if(LocationInfo::has_instance())
       {
@@ -438,8 +439,8 @@ int main(int argc, char **argv)
                   << std::endl;
       }
   });
-  */
-    // Init Logiclinking
+
+  // Init Logiclinking
   if (cfg.getValue("GLOBAL", "LINKS", value))
   {
     if (!LinkManager::initialize(cfg, value))
