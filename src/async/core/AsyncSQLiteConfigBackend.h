@@ -216,6 +216,12 @@ class SQLiteConfigBackend : public ConfigBackend
      */
     virtual bool initializeTables(void) override;
 
+    /**
+     * @brief Finalize database initialization after tables are populated
+     * @return true on success, false on failure
+     */
+    virtual bool finalizeInitialization(void) override;
+
   protected:
 
   private:

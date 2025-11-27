@@ -134,7 +134,8 @@ bool SQLiteConfigBackend::open(const string& source)
   }
   
   // Note: Tables will be created later after table prefix is set
-  // createTables() and initializeLastCheckTime() are now called from initializeDatabase()
+  // createTables() is called from initializeTables()
+  // initializeLastCheckTime() is called from finalizeInitialization() after population
   
   return true;
 } /* SQLiteConfigBackend::open */
@@ -229,11 +230,12 @@ bool SQLiteConfigBackend::setValue(const std::string& section, const std::string
   sqlite3_bind_text(stmt, 2, tag.c_str(), -1, SQLITE_STATIC);
   sqlite3_bind_text(stmt, 3, value.c_str(), -1, SQLITE_STATIC);
   
-
+  /*
   cout << "*** DEBUG: Executing INSERT statement: " << sql << endl;
   cout << "*** DEBUG: Section: " << section << endl;
   cout << "*** DEBUG: Tag: " << tag << endl;
   cout << "*** DEBUG: Value: " << value << endl;
+  */
   
   rc = sqlite3_step(stmt);
   sqlite3_finalize(stmt);
@@ -355,12 +357,27 @@ bool SQLiteConfigBackend::initializeTables(void)
     return false;
   }
   
-  // Initialize m_last_check_time to the most recent updated_at in the database
-  // This prevents detecting all existing records as "changes" on first poll
-  initializeLastCheckTime();
+  // Note: initializeLastCheckTime() is now called from finalizeInitialization()
+  // after tables are populated, not here when tables are empty
   
   return true;
 } /* SQLiteConfigBackend::initializeTables */
+
+bool SQLiteConfigBackend::finalizeInitialization(void)
+{
+  if (!isOpen())
+  {
+    cerr << "*** ERROR: Cannot finalize initialization - database not open" << endl;
+    return false;
+  }
+  
+  // Initialize m_last_check_time to the most recent updated_at in the database
+  // This prevents detecting all existing records as "changes" on first poll
+  // This must be called AFTER tables are populated with data
+  initializeLastCheckTime();
+  
+  return true;
+} /* SQLiteConfigBackend::finalizeInitialization */
 
 bool SQLiteConfigBackend::checkForExternalChanges(void)
 {

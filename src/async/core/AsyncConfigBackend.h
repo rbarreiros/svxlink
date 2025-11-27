@@ -224,6 +224,14 @@ class ConfigBackend : public sigc::trackable
     virtual bool initializeTables(void) { return true; }
 
     /**
+     * @brief   Finalize database initialization after tables are populated
+     * @return  true on success, false on failure
+     * @note    This should be called after tables are created and populated with data.
+     *          Backends can use this to initialize change tracking timestamps, etc.
+     */
+    virtual bool finalizeInitialization(void) { return true; }
+
+    /**
      * @brief   Enable or disable change notifications
      * @param   enable true to enable, false to disable
      */

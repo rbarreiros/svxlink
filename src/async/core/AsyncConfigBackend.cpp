@@ -42,10 +42,11 @@ ConfigBackend::ConfigBackend(bool enable_notifications, unsigned int auto_poll_i
     m_poll_timer(nullptr)
 {
   // Auto-start polling if notifications are enabled and interval > 0
-  if (m_enable_change_notifications && auto_poll_interval_ms > 0)
-  {
-    startAutoPolling(auto_poll_interval_ms);
-  }
+  /* We can't start the polling here, because the database may not be initialized yet */
+  //if (m_enable_change_notifications && auto_poll_interval_ms > 0)
+  //{
+  //  startAutoPolling(auto_poll_interval_ms);
+  //}
 }
 
 ConfigBackend::~ConfigBackend(void)

@@ -212,17 +212,6 @@ ConfigBackendPtr ConfigManager::initializeBackend(const std::string& config_dir,
     backend->setTablePrefix(db_config.table_prefix);
   }
   
-  // Apply db.conf notification settings to the backend
-  backend->enableChangeNotifications(db_config.enable_change_notifications);
-  if (db_config.enable_change_notifications && db_config.poll_interval_seconds > 0)
-  {
-    backend->startAutoPolling(db_config.poll_interval_seconds * 1000); // Convert to milliseconds
-    cout << "Auto-polling enabled with interval: " << db_config.poll_interval_seconds << " seconds" << endl;
-  }
-  
-  cout << "Successfully initialized " << backend->getBackendType() 
-       << " configuration backend: " << backend->getBackendInfo() << endl;
-  
   // For database backends, check if initialization is needed
   if (backend->getBackendType() != "file")
   {
@@ -233,6 +222,19 @@ ConfigBackendPtr ConfigManager::initializeBackend(const std::string& config_dir,
       return nullptr;
     }
   }
+
+  // Apply db.conf notification settings to the backend
+  // This probably makes using the constructor args in AsyncConfigBackend pointless.....
+  backend->enableChangeNotifications(db_config.enable_change_notifications);
+  if (db_config.enable_change_notifications && db_config.poll_interval_seconds > 0)
+  {
+    backend->startAutoPolling(db_config.poll_interval_seconds * 1000); // Convert to milliseconds
+    cout << "Auto-polling enabled with interval: " << db_config.poll_interval_seconds << " seconds" << endl;
+  }
+  
+  cout << "Successfully initialized " << backend->getBackendType() 
+       << " configuration backend: " << backend->getBackendInfo() << endl;
+  
   
   return backend;
 } /* ConfigManager::initializeBackend */
@@ -320,8 +322,18 @@ ConfigBackendPtr ConfigManager::initializeBackendFromFile(const std::string& db_
   {
     backend->setTablePrefix(db_config.table_prefix);
   }
-  
+
+  // For database backends, check if initialization is needed
+  if (backend->getBackendType() != "file") {
+    if (!initializeDatabase(backend.get(), default_config_file)) {
+      m_last_error = "Failed to initialize database backend";
+      cerr << "*** ERROR: " << m_last_error << endl;
+      return nullptr;
+    }
+  }
+
   // Apply db.conf notification settings to the backend
+  // This probably makes using the constructor args in AsyncConfigBackend pointless.....
   backend->enableChangeNotifications(db_config.enable_change_notifications);
   if (db_config.enable_change_notifications && db_config.poll_interval_seconds > 0)
   {
@@ -331,17 +343,6 @@ ConfigBackendPtr ConfigManager::initializeBackendFromFile(const std::string& db_
   
   cout << "Successfully initialized " << backend->getBackendType() 
        << " configuration backend: " << backend->getBackendInfo() << endl;
-  
-  // For database backends, check if initialization is needed
-  if (backend->getBackendType() != "file")
-  {
-    if (!initializeDatabase(backend.get(), default_config_file))
-    {
-      m_last_error = "Failed to initialize database backend";
-      cerr << "*** ERROR: " << m_last_error << endl;
-      return nullptr;
-    }
-  }
   
   return backend;
 } /* ConfigManager::initializeBackendFromFile */
@@ -465,9 +466,10 @@ bool ConfigManager::parseDbConfigFile(const std::string& file_path, DbConfig& co
   return true;
 } /* ConfigManager::parseDbConfigFile */
 
+
+// This should be called before the polling is started....
 bool ConfigManager::initializeDatabase(ConfigBackend* backend, const std::string& default_config_file)
 {
-  // TODO - BUG when the database is initialized, the polling, if enabled, doesn't start.
 
   if (backend == nullptr)
   {
@@ -486,6 +488,12 @@ bool ConfigManager::initializeDatabase(ConfigBackend* backend, const std::string
   if (!sections.empty())
   {
     cout << "Database already initialized with " << sections.size() << " sections" << endl;
+    // Finalize initialization even for existing databases to ensure change tracking is set up
+    // (e.g., initialize last_check_time in SQLite backend)
+    if (!backend->finalizeInitialization())
+    {
+      cerr << "*** WARNING: Failed to finalize database initialization" << endl;
+    }
     return true;
   }
   
@@ -493,17 +501,10 @@ bool ConfigManager::initializeDatabase(ConfigBackend* backend, const std::string
   
   // Disable change notifications during initialization to avoid spurious signals
   bool was_enabled = backend->changeNotificationsEnabled();
-  bool was_polling = backend->isAutoPolling();
-  unsigned int poll_interval_ms = backend->getPollingInterval();
   if (was_enabled)
   {
     //cout << "[DEBUG] Disabling change notifications during database initialization" << endl;
     backend->enableChangeNotifications(false);
-  }
-  if (was_polling)
-  {
-    //cout << "[DEBUG] Stopping auto-polling during database initialization (was " << poll_interval_ms << "ms)" << endl;
-    backend->stopAutoPolling();
   }
   
   // Try to populate from existing file configuration first
@@ -517,16 +518,18 @@ bool ConfigManager::initializeDatabase(ConfigBackend* backend, const std::string
     populateDefaultConfiguration(backend);
   }
   
+  // Finalize initialization after tables are populated
+  // This initializes change tracking timestamps (e.g., last_check_time in SQLite)
+  if (!backend->finalizeInitialization())
+  {
+    cerr << "*** WARNING: Failed to finalize database initialization" << endl;
+  }
+  
   // Re-enable change notifications and polling if they were enabled before
   if (was_enabled)
   {
     //cout << "[DEBUG] Re-enabling change notifications after database initialization" << endl;
     backend->enableChangeNotifications(true);
-  }
-  if (was_polling && poll_interval_ms > 0)
-  {
-    //cout << "[DEBUG] Restarting auto-polling after database initialization (" << poll_interval_ms << "ms)" << endl;
-    backend->startAutoPolling(poll_interval_ms);
   }
   
   // Verify initialization
