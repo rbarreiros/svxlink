@@ -229,6 +229,12 @@ bool SQLiteConfigBackend::setValue(const std::string& section, const std::string
   sqlite3_bind_text(stmt, 2, tag.c_str(), -1, SQLITE_STATIC);
   sqlite3_bind_text(stmt, 3, value.c_str(), -1, SQLITE_STATIC);
   
+
+  cout << "*** DEBUG: Executing INSERT statement: " << sql << endl;
+  cout << "*** DEBUG: Section: " << section << endl;
+  cout << "*** DEBUG: Tag: " << tag << endl;
+  cout << "*** DEBUG: Value: " << value << endl;
+  
   rc = sqlite3_step(stmt);
   sqlite3_finalize(stmt);
   

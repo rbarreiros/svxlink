@@ -416,6 +416,9 @@ int main(int argc, char **argv)
 
   // Everything else requires a restart of svxlink to update the config
   // we only hot update the location info
+  /*
+  BUG HERE, it reinserts the location info section every time the config is loaded and doesn't exist
+  worse, it inserts with the wrong value
   cfg.subscribeValue("GLOBAL", "LOCATION_INFO", value, [&cfg](const std::string& value) {
       // Do we have a location info section already ?!!??!
       if(LocationInfo::has_instance())
@@ -435,7 +438,7 @@ int main(int argc, char **argv)
                   << std::endl;
       }
   });
-
+  */
     // Init Logiclinking
   if (cfg.getValue("GLOBAL", "LINKS", value))
   {

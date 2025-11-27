@@ -467,6 +467,8 @@ bool ConfigManager::parseDbConfigFile(const std::string& file_path, DbConfig& co
 
 bool ConfigManager::initializeDatabase(ConfigBackend* backend, const std::string& default_config_file)
 {
+  // TODO - BUG when the database is initialized, the polling, if enabled, doesn't start.
+
   if (backend == nullptr)
   {
     return false;
