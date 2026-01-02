@@ -230,7 +230,8 @@ Reflector::Reflector(void)
   : m_srv(0), m_udp_sock(0), m_tg_for_v1_clients(1), m_random_qsy_lo(0),
     m_random_qsy_hi(0), m_random_qsy_tg(0), m_http_server(0), m_cmd_pty(0),
     m_keys_dir("private/"), m_pending_csrs_dir("pending_csrs/"),
-    m_csrs_dir("csrs/"), m_certs_dir("certs/"), m_pki_dir("pki/")
+    m_csrs_dir("csrs/"), m_certs_dir("certs/"), m_pki_dir("pki/"),
+    m_remote_auth_enable(false)
 {
   TGHandler::instance()->talkerUpdated.connect(
       mem_fun(*this, &Reflector::onTalkerUpdated));
@@ -369,6 +370,25 @@ bool Reflector::initialize(Async::Config &cfg)
   m_cfg->getValue("GLOBAL", "ACCEPT_CERT_EMAIL", m_accept_cert_email);
 
   m_cfg->valueUpdated.connect(sigc::mem_fun(*this, &Reflector::cfgUpdated));
+
+  m_remote_auth_enable = false;
+  m_cfg->getValue("REMOTE_USER_AUTH", "USER_AUTH_ENABLE", m_remote_auth_enable);
+  if (m_remote_auth_enable)
+  {
+    string url, token;
+    bool force_valid_ssl = true;
+    if (m_cfg->getValue("REMOTE_USER_AUTH", "USER_AUTH_URL", url) &&
+        m_cfg->getValue("REMOTE_USER_AUTH", "USER_AUTH_TOKEN", token))
+    {
+      m_cfg->getValue("REMOTE_USER_AUTH", "USER_AUTH_FORCE_VALID_SSL", force_valid_ssl);
+      RemoteUserAuth::instance()->setParams(url, token, force_valid_ssl);
+    }
+    else
+    {
+      std::cerr << "*** WARNING: REMOTE_USER_AUTH enabled but USER_AUTH_URL or USER_AUTH_TOKEN missing in configuration section [REMOTE_USER_AUTH]" << std::endl;
+      m_remote_auth_enable = false;
+    }
+  }
 
   return true;
 } /* Reflector::initialize */

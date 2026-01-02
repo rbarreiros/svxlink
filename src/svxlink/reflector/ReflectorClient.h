@@ -127,6 +127,7 @@ class ReflectorClient : public sigc::trackable
       STATE_EXPECT_SSL_CON_READY,
       STATE_EXPECT_CSR,
       STATE_EXPECT_AUTH_RESPONSE,
+      STATE_EXPECT_REMOTE_AUTH,
       STATE_CONNECTED
     } ConState;
 
@@ -582,6 +583,8 @@ class ReflectorClient : public sigc::trackable
     bool sendClientCert(const Async::SslX509& cert);
     void sendAuthChallenge(void);
     void renewClientCertificate(void);
+    void onRemoteAuthDone(bool success, const std::string& message,
+                          const MsgAuthResponse& msg, const std::string& auth_key);
     void setMonitoredTGs(const std::set<uint32_t>& tgs);
     void setTg(uint32_t tg);
 

@@ -22,11 +22,17 @@ set(LIBS ${LIBS} ${JSONCPP_LIBRARIES})
 # Add project libraries
 set(LIBS asynccpp asyncaudio asynccore svxmisc ${LIBS})
 
+# Find libcurl libraries
+pkg_check_modules(CURL REQUIRED libcurl)
+include_directories(${CURL_INCLUDE_DIRS})
+set(LIBS ${LIBS} ${CURL_LIBRARIES})
+
 # Build the executable
 add_executable(svxreflector
   svxreflector.cpp Reflector.cpp ReflectorClient.cpp TGHandler.cpp
+  RemoteUserAuth.cpp
 )
-target_link_libraries(svxreflector ${LIBS})
+target_link_libraries(svxreflector ${LIBS} ${CURL_LIBRARIES})
 set_target_properties(svxreflector PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY ${RUNTIME_OUTPUT_DIRECTORY}
 )
