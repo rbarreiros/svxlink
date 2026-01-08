@@ -36,6 +36,21 @@ set(LIBS ${LIBS} ${OPENSSL_LIBRARIES})
 find_package(Threads)
 set(LIBS ${LIBS} ${CMAKE_THREAD_LIBS_INIT})
 
+# Find Paho MQTT C++
+find_library(PAHO_MQTT_CPP_LIB paho-mqttpp3 NAMES paho-mqttpp3 paho-mqttpp)
+find_library(PAHO_MQTT_C_LIB paho-mqtt3as NAMES paho-mqtt3as paho-mqtt3a)
+
+if (PAHO_MQTT_CPP_LIB AND PAHO_MQTT_C_LIB)
+  message(STATUS "Found Paho MQTT C++: ${PAHO_MQTT_CPP_LIB}")
+  set(LIBS ${LIBS} ${PAHO_MQTT_CPP_LIB} ${PAHO_MQTT_C_LIB})
+  set(EXPINC ${EXPINC} AsyncMqttClient.h)
+  set(LIBSRC ${LIBSRC} AsyncMqttClient.cpp)
+  expinc(AsyncMqttClient.h)
+  add_definitions(-DHAVE_MQTT)
+else()
+  message(STATUS "Paho MQTT C++ library not found. AsyncMqttClient will NOT be built.")
+endif()
+
 # Set up additional defines
 # FIXME: Do we need this?
 add_definitions(-D_REENTRANT)

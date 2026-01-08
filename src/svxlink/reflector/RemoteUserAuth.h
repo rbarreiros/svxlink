@@ -1,8 +1,27 @@
 /**
-@file    RemoteUserAuth.h
-@brief   Handles remote user authentication via a web API
+@file	 RemoteUserAuth.h
+@brief   Async wrapper for Paho MQTT C++ client
 @author  Rui Barreiros / CR7BPM
-@date    2026-01-02
+@date	 2026-01-07
+
+\verbatim
+SvxReflector - An audio reflector for connecting SvxLink Servers
+Copyright (C) 2003-2026 Tobias Blomberg / SM0SVX
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+\endverbatim
 */
 
 #ifndef REMOTE_USER_AUTH_INCLUDED
@@ -56,20 +75,56 @@
 
 /**
 @brief   Handles remote user authentication via a web API
-@author  Antigravity
+@author  Rui Barreiros / CR7BPM
 @date    2026-01-02
 
 This class performs asynchronous HTTP POST requests to a remote authentication
 server. It uses libcurl's multi-interface to avoid blocking the main event
 loop.
+
+### Configuration Options
+The following options should be set in the `[REMOTE_USER_AUTH]` section of `svxreflector.conf`:
+- `USER_AUTH_ENABLE`: Set to 1 to enable remote authentication.
+- `USER_AUTH_URL`: The URL of the authentication endpoint (e.g., `http://localhost:8000/api/v1/auth/user`).
+- `USER_AUTH_TOKEN`: A Bearer token used for authenticating with the remote API.
+- `USER_AUTH_FORCE_VALID_SSL`: Set to 0 to allow insecure/self-signed SSL certificates.
+
+### API Communication
+
+**Request (POST)**:
+The body is a JSON object containing the username, HMAC digest, and original challenge.
+```json
+{
+  "username": "SM0ABC",
+  "digest": "a1b2c3d4e5f6...",
+  "challenge": "f8e7d6c5b4a3..."
+}
+```
+An `Authorization: Bearer <token>` header is also included.
+
+**Response (Expected JSON)**:
+The server MUST return a JSON object with at least `success` and `message` fields.
+```json
+{
+  "success": true,
+  "message": "Authentication successful"
+}
+```
+If `success` is false, the `message` will be logged/reported to the client.
+
 */
 class RemoteUserAuth : public sigc::trackable
 {
   public:
     /**
-     * @brief   Get the class instance
+     * @brief   Constructor
      */
-    static RemoteUserAuth* instance(void);
+    RemoteUserAuth(void);
+
+    /**
+     * @brief   Destructor
+     */
+    ~RemoteUserAuth(void);
 
     /**
      * @brief   Set parameters for the remote authentication
@@ -92,16 +147,6 @@ class RemoteUserAuth : public sigc::trackable
                    sigc::slot<void(bool, std::string)> callback);
 
   private:
-    /**
-     * @brief   Constructor
-     */
-    RemoteUserAuth(void);
-
-    /**
-     * @brief   Destructor
-     */
-    ~RemoteUserAuth(void);
-
     struct WatchSet
     {
       WatchSet() : rd_enabled(false), wr_enabled(false) {}
@@ -119,8 +164,6 @@ class RemoteUserAuth : public sigc::trackable
       std::string response_data;
       sigc::slot<void(bool, std::string)> callback;
     };
-
-    static RemoteUserAuth* m_instance;
 
     std::string m_auth_url;
     std::string m_auth_token;

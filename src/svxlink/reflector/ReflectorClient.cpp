@@ -186,6 +186,7 @@ ReflectorClient::ReflectorClient(Reflector *ref, Async::FramedTcpConnection *con
                                  Async::Config *cfg)
   : m_con(con), m_con_state(STATE_EXPECT_PROTO_VER),
     m_disc_timer(10000, Timer::TYPE_ONESHOT, false),
+    m_login_time(0),
     m_client_id(newClientId(this)), m_remote_udp_port(0), m_cfg(cfg),
     /*m_next_udp_tx_seq(0),*/ m_next_udp_rx_seq(0),
     m_heartbeat_timer(1000, Timer::TYPE_PERIODIC),
@@ -781,7 +782,6 @@ void ReflectorClient::handleMsgAuthResponse(std::istream& is)
     }
 
     std::cout << msg.callsign() << ": Starting remote authentication..." << std::endl;
-    m_con_state = STATE_EXPECT_REMOTE_AUTH;
     m_reflector->remoteUserAuth()->checkUser(msg.callsign(), digest_hex, challenge_hex,
         sigc::bind(sigc::mem_fun(*this, &ReflectorClient::onRemoteAuthDone), msg, auth_key));
     return;
@@ -1367,6 +1367,7 @@ void ReflectorClient::connectionAuthenticated(const std::string& callsign)
   {
     m_con->setMaxRxFrameSize(ReflectorMsg::MAX_POSTAUTH_FRAME_SIZE);
     m_callsign = callsign;
+    m_login_time = std::time(nullptr);
     sendMsg(MsgAuthOk());
     cout << m_callsign << ": Login OK from "
          << m_con->remoteHost() << ":" << m_con->remotePort()
@@ -1374,6 +1375,7 @@ void ReflectorClient::connectionAuthenticated(const std::string& callsign)
          << "." << m_client_proto_ver.minorVer()
          << endl;
     m_con_state = STATE_CONNECTED;
+    m_reflector->onClientAuthenticated(this);
 
     assert(client_callsign_map.find(m_callsign) == client_callsign_map.end());
     client_callsign_map[m_callsign] = this;

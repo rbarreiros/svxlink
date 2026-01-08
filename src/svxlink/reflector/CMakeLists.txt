@@ -27,6 +27,18 @@ pkg_check_modules(CURL REQUIRED libcurl)
 include_directories(${CURL_INCLUDE_DIRS})
 set(LIBS ${LIBS} ${CURL_LIBRARIES})
 
+# Find Paho MQTT C++
+find_library(PAHO_MQTT_CPP_LIB paho-mqttpp3 NAMES paho-mqttpp3 paho-mqttpp)
+find_library(PAHO_MQTT_C_LIB paho-mqtt3as NAMES paho-mqtt3as paho-mqtt3a)
+
+if(PAHO_MQTT_CPP_LIB AND PAHO_MQTT_C_LIB)
+  add_definitions(-DHAVE_MQTT)
+  set(LIBS ${LIBS} ${PAHO_MQTT_CPP_LIB} ${PAHO_MQTT_C_LIB})
+  message(STATUS "Found Paho MQTT C++: ${PAHO_MQTT_CPP_LIB}")
+else()
+  message(STATUS "Paho MQTT C++ not found. MQTT support disabled.")
+endif()
+
 # Build the executable
 add_executable(svxreflector
   svxreflector.cpp Reflector.cpp ReflectorClient.cpp TGHandler.cpp

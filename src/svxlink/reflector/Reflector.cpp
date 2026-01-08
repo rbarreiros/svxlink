@@ -52,6 +52,10 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <AsyncApplication.h>
 #include <AsyncPty.h>
 
+#ifdef HAVE_MQTT
+#include <AsyncMqttClient.h>
+#endif
+
 #include <common.h>
 #include <config.h>
 
@@ -232,7 +236,17 @@ Reflector::Reflector(void)
     m_keys_dir("private/"), m_pending_csrs_dir("pending_csrs/"),
     m_csrs_dir("csrs/"), m_certs_dir("certs/"), m_pki_dir("pki/"),
     m_remote_auth_enable(false)
+    , m_remote_user_auth(new RemoteUserAuth())
+#ifdef HAVE_MQTT
+    , m_mqtt_client(nullptr)
+    , m_mqtt_reconnect_timer(0, Async::Timer::TYPE_ONESHOT, false)
+    , m_mqtt_reconnect_delay_ms(1000)
+#endif
 {
+#ifdef HAVE_MQTT
+  m_mqtt_reconnect_timer.expired.connect(
+      mem_fun(*this, &Reflector::onMqttReconnectTimer));
+#endif
   TGHandler::instance()->talkerUpdated.connect(
       mem_fun(*this, &Reflector::onTalkerUpdated));
   TGHandler::instance()->requestAutoQsy.connect(
@@ -272,6 +286,28 @@ Reflector::~Reflector(void)
   m_client_con_map.clear();
   ReflectorClient::cleanup();
   delete TGHandler::instance();
+  delete m_remote_user_auth;
+#ifdef HAVE_MQTT
+  if (m_mqtt_client) {
+      if (m_mqtt_client->isConnected()) {
+          // Graceful disconnect: Publish offline status
+          if (!m_mqtt_status_topic.empty()) {
+            try {
+                m_mqtt_client->publish(m_mqtt_status_topic, "offline", 1, true);
+                // Give it a moment to send? Paho async usually handles this if we wait.
+            } catch (...) {}
+          }
+          // Stop reconnection timer
+           m_mqtt_reconnect_timer.setEnable(false);
+           
+          // Disconnect
+          try {
+             m_mqtt_client->disconnect(200); // Short timeout to not block too long
+          } catch (...) {}
+      }
+      delete m_mqtt_client;
+  }
+#endif
 } /* Reflector::~Reflector */
 
 
@@ -381,7 +417,7 @@ bool Reflector::initialize(Async::Config &cfg)
         m_cfg->getValue("REMOTE_USER_AUTH", "USER_AUTH_TOKEN", token))
     {
       m_cfg->getValue("REMOTE_USER_AUTH", "USER_AUTH_FORCE_VALID_SSL", force_valid_ssl);
-      RemoteUserAuth::instance()->setParams(url, token, force_valid_ssl);
+      m_remote_user_auth->setParams(url, token, force_valid_ssl);
     }
     else
     {
@@ -390,9 +426,284 @@ bool Reflector::initialize(Async::Config &cfg)
     }
   }
 
+#ifdef HAVE_MQTT
+  bool mqtt_enabled = false;
+  cfg.getValue("MQTT", "MQTT_ENABLED", mqtt_enabled);
+  if (mqtt_enabled)
+  {
+    string mqtt_host = "localhost";
+    int mqtt_port = 1883;
+    string mqtt_username = "";
+    string mqtt_password = "";
+    string mqtt_topic_prefix = "reflector";
+    bool mqtt_ssl_enabled = false;
+    
+    cfg.getValue("MQTT", "MQTT_HOST", mqtt_host);
+    cfg.getValue("MQTT", "MQTT_PORT", mqtt_port);
+    cfg.getValue("MQTT", "MQTT_USERNAME", mqtt_username);
+    cfg.getValue("MQTT", "MQTT_PASSWORD", mqtt_password);
+    cfg.getValue("MQTT", "MQTT_TOPIC_PREFIX", mqtt_topic_prefix);
+    cfg.getValue("MQTT", "MQTT_SSL_ENABLED", mqtt_ssl_enabled);
+
+    string server_uri = (mqtt_ssl_enabled ? "ssl://" : "tcp://") + mqtt_host + ":" + to_string(mqtt_port);
+    string client_id = "svxreflector-" + to_string(getpid()); 
+    
+    std::string reflector_id = getReflectorId();
+    if (!reflector_id.empty()) 
+    {
+        m_mqtt_status_topic = mqtt_topic_prefix + "/" + reflector_id + "/status";
+        m_mqtt_online_clients_topic = mqtt_topic_prefix + "/" + reflector_id + "/connections/online";
+        m_mqtt_offline_clients_topic = mqtt_topic_prefix + "/" + reflector_id + "/connections/offline";
+        m_mqtt_talker_topic = mqtt_topic_prefix + "/" + reflector_id + "/talker";
+    } else 
+    {
+        m_mqtt_status_topic = mqtt_topic_prefix + "/status";
+        m_mqtt_online_clients_topic = mqtt_topic_prefix + "/connections/online";
+        m_mqtt_offline_clients_topic = mqtt_topic_prefix + "/connections/offline";
+        m_mqtt_talker_topic = mqtt_topic_prefix + "/talker";
+        std::cerr << "MQTT: Warning: Could not generate unique Reflector ID from certificate. Using default status topic." << std::endl;
+    }
+    
+    m_mqtt_client = new Async::MqttClient(server_uri, client_id);
+    
+    // Set Last Will and Testament
+    m_mqtt_client->setWill(m_mqtt_status_topic, "offline", 1, true);
+    
+    mqtt::connect_options conn_opts;
+    conn_opts.set_clean_session(true);
+    if (!mqtt_username.empty()) 
+    {
+        conn_opts.set_user_name(mqtt_username);
+        conn_opts.set_password(mqtt_password);
+    }
+    
+    if (mqtt_ssl_enabled) 
+    {
+        mqtt::ssl_options ssl_opts;
+        
+        string ca_cert, client_cert, client_key;
+        bool verify_hostname = true;
+        
+        if (cfg.getValue("MQTT", "MQTT_CA_CERT_FILE", ca_cert)) 
+        {
+            ssl_opts.set_trust_store(ca_cert);
+        }
+
+        if (cfg.getValue("MQTT", "MQTT_CLIENT_CERT_FILE", client_cert)) 
+        {
+           ssl_opts.set_key_store(client_cert);
+        }
+
+        if (cfg.getValue("MQTT", "MQTT_CLIENT_KEY_FILE", client_key)) 
+        {
+           ssl_opts.set_private_key(client_key);
+        }
+
+        cfg.getValue("MQTT", "MQTT_SSL_VERIFY_HOSTNAME", verify_hostname);
+        ssl_opts.set_enable_server_cert_auth(verify_hostname);
+        
+        m_mqtt_client->setSslOptions(ssl_opts);
+    }
+    
+    m_mqtt_client->signalConnected.connect([this, server_uri]() {
+         cout << "MQTT: Connected to broker at " << server_uri << endl;
+         m_mqtt_reconnect_delay_ms = 1000;
+         m_mqtt_reconnect_timer.setEnable(false);
+         
+         // Publish Online Status
+         if (!m_mqtt_status_topic.empty()) 
+         {
+             m_mqtt_client->publish(m_mqtt_status_topic, "online", 1, true);
+         }
+    });
+    
+    // Timer is already configured as one-shot in constructor
+
+    m_mqtt_client->disconnected.connect([this](const string& reason) 
+    {
+         cout << "MQTT: Disconnected: " << reason << endl;
+         startMqttReconnect();
+    });
+    
+    m_mqtt_client->error.connect([this](const string& msg) 
+    {
+         cerr << "MQTT Error: " << msg << endl;
+         // If we are not connected, this might be a connection failure
+         if (!m_mqtt_client->isConnected()) 
+         {
+             startMqttReconnect();
+         }
+    });
+    
+    m_mqtt_client->connect(conn_opts);
+    cout << "MQTT: connecting to " << server_uri << endl;
+  }
+#endif
+
   return true;
 } /* Reflector::initialize */
 
+
+#ifdef HAVE_MQTT
+void Reflector::onMqttReconnectTimer(Async::Timer* t)
+{
+  if (m_mqtt_client) 
+  {
+     cout << "MQTT: Retrying connection..." << endl;
+     m_mqtt_client->reconnect();
+  }
+}
+void Reflector::startMqttReconnect(void)
+{
+  if (m_mqtt_reconnect_timer.isEnabled()) 
+  {
+      return; 
+  }
+  
+  if (m_mqtt_reconnect_delay_ms == 0) 
+  {
+      m_mqtt_reconnect_delay_ms = 1000;
+  }
+  
+  cout << "MQTT: Reconnecting in " << m_mqtt_reconnect_delay_ms << "ms" << endl;
+  m_mqtt_reconnect_timer.setTimeout(m_mqtt_reconnect_delay_ms);
+  m_mqtt_reconnect_timer.setEnable(true);
+  
+  m_mqtt_reconnect_delay_ms *= 2;
+  if (m_mqtt_reconnect_delay_ms > 60000) 
+  {
+      m_mqtt_reconnect_delay_ms = 60000;
+  }
+}
+
+std::string Reflector::getReflectorId()
+{
+  std::string cert_cn;
+  if (!m_cfg->getValue("SERVER_CERT", "COMMON_NAME", cert_cn) ||
+      cert_cn.empty())
+  {
+    std::cerr << "*** ERROR: The 'SERVER_CERT/COMMON_NAME' variable is "
+                 "unset which is needed for certificate signing request "
+                 "generation." << std::endl;
+    return "";
+  }
+
+  std::string cert_file;
+  if (!m_cfg->getValue("SERVER_CERT", "CRTFILE", cert_file)) 
+  {
+      cert_file = m_certs_dir + "/" + cert_cn + ".crt";
+  }
+
+  Async::SslX509 cert;
+  if (!cert.readPemFile(cert_file)) 
+  {
+      std::cerr << "MQTT: Error reading certificate file: " << cert_file << std::endl;
+      return "";
+  }
+  
+  if (cert.isNull()) 
+  {
+      std::cerr << "MQTT: Error, certificate file is null: " << cert_file << std::endl;
+      return "";
+  }
+  
+  Async::SslKeypair key = cert.publicKey();
+  if (key.isNull()) 
+  {
+      std::cerr << "MQTT: Error, public key is null: " << cert_file << std::endl;
+      return "";
+  }
+  
+  std::string pubkey_pem = key.publicKeyPem();
+  if (pubkey_pem.empty()) 
+  {
+      std::cerr << "MQTT: Error, public key is empty: " << cert_file << std::endl;
+      return "";
+  }
+  
+  Async::Digest::MsgDigest digest;
+  if (!Async::Digest().md(digest, "sha256", pubkey_pem)) 
+  {
+      std::cerr << "MQTT: Error, could not calculate digest: " << cert_file << std::endl;
+      return "";
+  }
+  
+  std::stringstream ss;
+  ss << std::hex << std::setfill('0');
+  for (unsigned char c : digest) 
+  {
+      ss << std::setw(2) << static_cast<int>(c);
+  }
+  
+  return ss.str();
+}
+
+void Reflector::publishOnlineClients()
+{
+    if (!m_mqtt_client || !m_mqtt_client->isConnected())
+    {
+        return;
+    }
+
+    Json::Value nodes_array(Json::arrayValue);
+    for (const auto& item : m_client_con_map)
+    {
+        ReflectorClient* client = item.second;
+        if (client->conState() == ReflectorClient::STATE_CONNECTED && !client->callsign().empty())
+        {
+            Json::Value client_obj;
+            client_obj["callsign"] = client->callsign();
+            client_obj["timestamp"] = static_cast<Json::Value::UInt64>(client->loginTime());
+            client_obj["ip"] = client->remoteHost().toString();
+            nodes_array.append(client_obj);
+        }
+    }
+
+    Json::StreamWriterBuilder writer;
+    std::string json_str = Json::writeString(writer, nodes_array);
+
+    try
+    {
+        m_mqtt_client->publish(m_mqtt_online_clients_topic, json_str, 1, true);
+    }
+    catch (...) {}
+}
+
+void Reflector::publishOfflineClients()
+{
+    if (!m_mqtt_client || !m_mqtt_client->isConnected())
+    {
+        return;
+    }
+
+    Json::Value nodes_array(Json::arrayValue);
+    for (const auto& item : m_offline_clients)
+    {
+        nodes_array.append(item.second);
+    }
+
+    Json::StreamWriterBuilder writer;
+    std::string json_str = Json::writeString(writer, nodes_array);
+
+    try
+    {
+        m_mqtt_client->publish(m_mqtt_offline_clients_topic, json_str, 1, true);
+    }
+    catch (...) {}
+}
+#endif
+
+void Reflector::onClientAuthenticated(ReflectorClient* client)
+{
+#ifdef HAVE_MQTT
+    if (!client->callsign().empty())
+    {
+        m_offline_clients.erase(client->callsign());
+        publishOnlineClients();
+        publishOfflineClients();
+    }
+#endif
+}
 
 void Reflector::nodeList(std::vector<std::string>& nodes) const
 {
@@ -884,9 +1195,12 @@ void Reflector::clientDisconnected(Async::FramedTcpConnection *con,
 
   TGHandler::instance()->removeClient(client);
 
-  if (!client->callsign().empty())
+  std::string callsign = client->callsign();
+  std::string ip = client->remoteHost().toString();
+
+  if (!callsign.empty())
   {
-    cout << client->callsign() << ": ";
+    cout << callsign << ": ";
   }
   else
   {
@@ -897,12 +1211,22 @@ void Reflector::clientDisconnected(Async::FramedTcpConnection *con,
 
   m_client_con_map.erase(it);
 
-  if (!client->callsign().empty())
-  {
-    m_status["nodes"].removeMember(client->callsign());
-    broadcastMsg(MsgNodeLeft(client->callsign()),
-        ReflectorClient::ExceptFilter(client));
-  }
+    if (!callsign.empty())
+    {
+      m_status["nodes"].removeMember(callsign);
+#ifdef HAVE_MQTT
+      Json::Value offline_obj;
+      offline_obj["callsign"] = callsign;
+      offline_obj["timestamp"] = static_cast<Json::Value::UInt64>(std::time(nullptr));
+      offline_obj["ip"] = ip;
+      m_offline_clients[callsign] = offline_obj;
+
+      publishOnlineClients();
+      publishOfflineClients();
+#endif
+      broadcastMsg(MsgNodeLeft(callsign),
+          ReflectorClient::ExceptFilter(client));
+    }
   //Application::app().runTask([=]{ delete client; });
   delete client;
 } /* Reflector::clientDisconnected */
@@ -1309,10 +1633,25 @@ void Reflector::udpDatagramReceived(const IpAddress& addr, uint16_t port,
 void Reflector::onTalkerUpdated(uint32_t tg, ReflectorClient* old_talker,
                                 ReflectorClient *new_talker)
 {
+  cout << "onTalkerUpdated" << endl;
   if (old_talker != 0)
   {
     cout << old_talker->callsign() << ": Talker stop on TG #" << tg << endl;
     old_talker->updateIsTalker();
+#ifdef HAVE_MQTT
+    if (m_mqtt_client && m_mqtt_client->isConnected())
+    {
+      Json::Value payload;
+      payload["source_callsign"] = old_talker->callsign();
+      payload["talkgroup"] = tg;
+      payload["timestamp"] = static_cast<Json::Value::UInt64>(std::time(nullptr));
+      payload["talking"] = false;
+
+      Json::StreamWriterBuilder writer;
+      std::string json_str = Json::writeString(writer, payload);
+      try { m_mqtt_client->publish(m_mqtt_talker_topic, json_str, 1, false); } catch (...) {}
+    }
+#endif
     broadcastMsg(MsgTalkerStop(tg, old_talker->callsign()),
         ReflectorClient::mkAndFilter(
           ge_v2_client_filter,
@@ -1332,6 +1671,20 @@ void Reflector::onTalkerUpdated(uint32_t tg, ReflectorClient* old_talker,
   {
     cout << new_talker->callsign() << ": Talker start on TG #" << tg << endl;
     new_talker->updateIsTalker();
+#ifdef HAVE_MQTT
+    if (m_mqtt_client && m_mqtt_client->isConnected())
+    {
+      Json::Value payload;
+      payload["source_callsign"] = new_talker->callsign();
+      payload["talkgroup"] = tg;
+      payload["timestamp"] = static_cast<Json::Value::UInt64>(std::time(nullptr));
+      payload["talking"] = true;
+
+      Json::StreamWriterBuilder writer;
+      std::string json_str = Json::writeString(writer, payload);
+      try { m_mqtt_client->publish(m_mqtt_talker_topic, json_str, 1, false); } catch (...) {}
+    }
+#endif
     broadcastMsg(MsgTalkerStart(tg, new_talker->callsign()),
         ReflectorClient::mkAndFilter(
           ge_v2_client_filter,

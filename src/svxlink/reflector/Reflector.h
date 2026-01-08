@@ -65,6 +65,10 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "ReflectorClient.h"
 #include "ProtoVer.h"
 
+#ifdef HAVE_MQTT
+#include <AsyncMqttClient.h>
+#endif
+
 
 /****************************************************************************
  *
@@ -77,6 +81,9 @@ namespace Async
   class EncryptedUdpSocket;
   class Config;
   class Pty;
+#ifdef HAVE_MQTT
+  class MqttClient;
+#endif
 };
 
 class ReflectorMsg;
@@ -213,9 +220,21 @@ class Reflector : public sigc::trackable
     Async::SslX509 csrReceived(Async::SslCertSigningReq& req);
 
     bool remoteAuthEnabled(void) const { return m_remote_auth_enable; }
-    RemoteUserAuth* remoteUserAuth(void) const { return RemoteUserAuth::instance(); }
+    RemoteUserAuth* remoteUserAuth(void) const { return m_remote_user_auth; }
 
     Json::Value& clientStatus(const std::string& callsign);
+
+#ifdef HAVE_MQTT
+    Async::MqttClient* mqttClient(void) const { return m_mqtt_client; }
+#endif
+
+    /**
+     * @brief Called when a client has successfully authenticated
+     * @param client The client that was authenticated
+     *
+     * This is for now used only on MQTT reporting.
+     */
+    void onClientAuthenticated(ReflectorClient* client);
 
   protected:
 
@@ -261,6 +280,28 @@ class Reflector : public sigc::trackable
     std::string                 m_accept_cert_email;
     Json::Value                 m_status;
     bool                        m_remote_auth_enable;
+    RemoteUserAuth*             m_remote_user_auth;
+#ifdef HAVE_MQTT
+    Async::MqttClient*          m_mqtt_client;
+    Async::Timer                m_mqtt_reconnect_timer;
+    unsigned                    m_mqtt_reconnect_delay_ms;
+    std::string                 m_mqtt_status_topic;
+    std::string                 m_mqtt_online_clients_topic;
+    std::string                 m_mqtt_offline_clients_topic;
+    std::string                 m_mqtt_talker_topic;
+    std::map<std::string, Json::Value> m_offline_clients;
+    
+    /**
+     * @brief Get the unique Reflector ID based on the server certificate's public key
+     * @return The unique ID as a hex string
+     */
+    std::string getReflectorId();
+
+    void onMqttReconnectTimer(Async::Timer* t);
+    void startMqttReconnect(void);
+    void publishOnlineClients();
+    void publishOfflineClients();
+#endif
 
     Reflector(const Reflector&);
     Reflector& operator=(const Reflector&);
