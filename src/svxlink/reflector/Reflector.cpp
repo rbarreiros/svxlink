@@ -294,9 +294,15 @@ Reflector::~Reflector(void)
           if (!m_mqtt_status_topic.empty()) {
             try {
                 m_mqtt_client->publish(m_mqtt_status_topic, "offline", 1, true);
-                // Give it a moment to send? Paho async usually handles this if we wait.
             } catch (...) {}
           }
+          if (!m_mqtt_online_clients_topic.empty()) {
+            try { m_mqtt_client->publish(m_mqtt_online_clients_topic, "[]", 1, true); } catch (...) {}
+          }
+          if (!m_mqtt_offline_clients_topic.empty()) {
+            try { m_mqtt_client->publish(m_mqtt_offline_clients_topic, "[]", 1, true); } catch (...) {}
+          }
+          m_offline_clients.clear();
           // Stop reconnection timer
            m_mqtt_reconnect_timer.setEnable(false);
            
@@ -514,6 +520,14 @@ bool Reflector::initialize(Async::Config &cfg)
          if (!m_mqtt_status_topic.empty()) 
          {
              m_mqtt_client->publish(m_mqtt_status_topic, "online", 1, true);
+         }
+         if (!m_mqtt_online_clients_topic.empty()) 
+         {
+             m_mqtt_client->publish(m_mqtt_online_clients_topic, "[]", 1, true);
+         }
+         if (!m_mqtt_offline_clients_topic.empty()) 
+         {
+             m_mqtt_client->publish(m_mqtt_offline_clients_topic, "[]", 1, true);
          }
     });
     
