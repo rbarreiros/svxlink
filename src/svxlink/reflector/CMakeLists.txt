@@ -40,13 +40,18 @@ else()
 endif()
 
 # Build the executable
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 add_executable(svxreflector
   svxreflector.cpp Reflector.cpp ReflectorClient.cpp TGHandler.cpp
   RemoteUserAuth.cpp
 )
 target_link_libraries(svxreflector ${LIBS} ${CURL_LIBRARIES})
-target_compile_features(svxreflector PRIVATE cxx_std_17)
 set_target_properties(svxreflector PROPERTIES
+  CXX_STANDARD 17
+  CXX_STANDARD_REQUIRED ON
   RUNTIME_OUTPUT_DIRECTORY ${RUNTIME_OUTPUT_DIRECTORY}
 )
 
