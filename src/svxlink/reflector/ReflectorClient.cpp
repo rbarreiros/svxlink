@@ -63,6 +63,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "ReflectorClient.h"
 #include "Reflector.h"
 #include "TGHandler.h"
+#include "RemoteUserAuth.h"
 
 
 /****************************************************************************
@@ -781,7 +782,7 @@ void ReflectorClient::handleMsgAuthResponse(std::istream& is)
       sprintf(&challenge_hex[i*2], "%02x", m_auth_challenge[i]);
     }
 
-    std::cout << msg.callsign() << ": Starting remote authentication..." << std::endl;
+    //std::cout << msg.callsign() << ": Starting remote authentication..." << std::endl;
     m_reflector->remoteUserAuth()->checkUser(msg.callsign(), digest_hex, challenge_hex,
         sigc::bind(sigc::mem_fun(*this, &ReflectorClient::onRemoteAuthDone), msg, auth_key));
     return;
@@ -801,7 +802,7 @@ void ReflectorClient::handleMsgAuthResponse(std::istream& is)
   }
 } /* ReflectorClient::handleMsgAuthResponse */
 
-
+// RemoteUserAuth callback
 void ReflectorClient::onRemoteAuthDone(bool success, const string& message, 
                                        const MsgAuthResponse& msg, const string& auth_key)
 {

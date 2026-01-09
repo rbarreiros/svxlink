@@ -1,6 +1,6 @@
 /**
 @file	 RemoteUserAuth.h
-@brief   Async wrapper for Paho MQTT C++ client
+@brief   Remote user authentication
 @author  Rui Barreiros / CR7BPM
 @date	 2026-01-07
 
@@ -36,7 +36,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 #include <string>
 #include <map>
-#include <queue>
+#include <memory>
+#include <chrono>
 #include <curl/curl.h>
 #include <sigc++/sigc++.h>
 
@@ -81,13 +82,23 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 This class performs asynchronous HTTP POST requests to a remote authentication
 server. It uses libcurl's multi-interface to avoid blocking the main event
 loop.
+If remote authentication is enabled, it's always the first to be checked. If the
+authentication fails, it will fallback to local config authentication.
 
 ### Configuration Options
 The following options should be set in the `[REMOTE_USER_AUTH]` section of `svxreflector.conf`:
 - `USER_AUTH_ENABLE`: Set to 1 to enable remote authentication.
-- `USER_AUTH_URL`: The URL of the authentication endpoint (e.g., `http://localhost:8000/api/v1/auth/user`).
+- `USER_AUTH_URL`: The URL of the authentication endpoint (e.g., `https://hostname/api/v1/auth/user`).
 - `USER_AUTH_TOKEN`: A Bearer token used for authenticating with the remote API.
 - `USER_AUTH_FORCE_VALID_SSL`: Set to 0 to allow insecure/self-signed SSL certificates.
+
+Example:
+
+[REMOTE_USER_AUTH]
+USER_AUTH_ENABLE=1
+USER_AUTH_URL=https://hostname/api/v1/auth/user
+USER_AUTH_TOKEN=_JWT_TOKEN_
+USER_AUTH_FORCE_VALID_SSL=1
 
 ### API Communication
 
@@ -112,10 +123,32 @@ The server MUST return a JSON object with at least `success` and `message` field
 ```
 If `success` is false, the `message` will be logged/reported to the client.
 
+The absense of success or anything other than true, will be treated as a login failure.
+
 */
 class RemoteUserAuth : public sigc::trackable
 {
   public:
+    /**
+     * @brief   Initialize curl globally (call once at application startup)
+     *
+     *          This could actually be called in the main() function, it
+     *          should only be called once per application! But since Reflector
+     *          class is ran only once, it's ok!
+
+     * @return  True on success, false on failure
+     */
+    static bool curlGlobalInit(void);
+
+    /**
+     * @brief   Cleanup curl globally (call once at application shutdown)
+
+     *          This could actually be called in the main() function, like
+     *          curlGlobalInit, it should only be called once per application! 
+     *          But since Reflector class is ran only once, it's ok!
+     */
+    static void curlGlobalCleanup(void);
+
     /**
      * @brief   Constructor
      */
@@ -146,6 +179,24 @@ class RemoteUserAuth : public sigc::trackable
                    const std::string& challenge,
                    sigc::slot<void(bool, std::string)> callback);
 
+    /**
+     * @brief   Get total number of requests processed
+     * @return  Total request count
+     */
+    uint64_t totalRequests(void) const { return m_total_requests; }
+
+    /**
+     * @brief   Get number of failed requests
+     * @return  Failed request count
+     */
+    uint64_t failedRequests(void) const { return m_failed_requests; }
+
+    /**
+     * @brief   Get number of retried requests
+     * @return  Retried request count
+     */
+    uint64_t retriedRequests(void) const { return m_retried_requests; }
+
   private:
     struct WatchSet
     {
@@ -163,20 +214,38 @@ class RemoteUserAuth : public sigc::trackable
       std::string post_data;
       std::string response_data;
       sigc::slot<void(bool, std::string)> callback;
+      int retry_count;
+      std::chrono::steady_clock::time_point start_time;
+      std::string username;  // For logging
     };
 
     std::string m_auth_url;
     std::string m_auth_token;
     bool        m_force_valid_ssl;
     CURLM*      m_multi_handle;
-    Async::Timer m_update_timer;
-    std::map<int, WatchSet*> m_watch_map;
-    std::map<CURL*, Request*> m_request_map;
+    Async::Timer m_timeout_timer;
+    std::map<int, std::unique_ptr<WatchSet>> m_watch_map;
+    std::map<CURL*, std::unique_ptr<Request>> m_request_map;
+    
+    // Useful statistics, for logging and debugging
+    uint64_t m_total_requests;
+    uint64_t m_failed_requests;
+    uint64_t m_retried_requests;
 
-    void onTimeout(Async::Timer *timer);
-    void onActivity(Async::FdWatch *watch);
-    void updateWatchMap(void);
+    void onCurlTimer(Async::Timer *timer);
+    void onSocketActivity(Async::FdWatch *watch);
     void checkMultiInfo(void);
+    void retryRequest(Request* req);
+    
+    // Socket action API callbacks
+    static int socketCallback(CURL* easy, curl_socket_t s, int what,
+                             void* userp, void* socketp);
+    static int timerCallback(CURLM* multi, long timeout_ms, void* userp);
+    
+    int handleSocketAction(CURL* easy, curl_socket_t s, int what, void* socketp);
+    int handleTimerUpdate(long timeout_ms);
+    void performSocketAction(curl_socket_t s, int event_bitmask);
+    
     static size_t writeCallback(void *contents, size_t size, size_t nmemb, void *userp);
 
 };  /* class RemoteUserAuth */

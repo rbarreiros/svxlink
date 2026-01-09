@@ -71,6 +71,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "Reflector.h"
 #include "ReflectorClient.h"
 #include "TGHandler.h"
+#include "RemoteUserAuth.h"
 
 
 /****************************************************************************
@@ -237,18 +238,22 @@ Reflector::Reflector(void)
     m_random_qsy_hi(0), m_random_qsy_tg(0), m_http_server(0), m_cmd_pty(0),
     m_keys_dir("private/"), m_pending_csrs_dir("pending_csrs/"),
     m_csrs_dir("csrs/"), m_certs_dir("certs/"), m_pki_dir("pki/"),
-    m_remote_auth_enable(false)
-    , m_remote_user_auth(new RemoteUserAuth())
+    m_remote_auth_enable(false),
+    m_remote_user_auth(new RemoteUserAuth()) // remote user auth
 #ifdef HAVE_MQTT
     , m_mqtt_client(nullptr)
     , m_mqtt_reconnect_timer(0, Async::Timer::TYPE_ONESHOT, false)
     , m_mqtt_reconnect_delay_ms(1000)
 #endif
 {
-#ifdef HAVE_MQTT
-  m_mqtt_reconnect_timer.expired.connect(
-      mem_fun(*this, &Reflector::onMqttReconnectTimer));
-#endif
+  // Initialize curl globally for RemoteUserAuth
+  // Could be in main()...
+  if (!RemoteUserAuth::curlGlobalInit())
+  {
+    std::cerr << "*** WARNING: curl global initialization failed. "
+              << "Remote user authentication will not work." << std::endl;
+  }
+  
   TGHandler::instance()->talkerUpdated.connect(
       mem_fun(*this, &Reflector::onTalkerUpdated));
   TGHandler::instance()->requestAutoQsy.connect(
@@ -272,6 +277,13 @@ Reflector::Reflector(void)
         }
       });
   m_status["nodes"] = Json::Value(Json::objectValue);
+
+  // MQTT Implementation
+#ifdef HAVE_MQTT
+  m_mqtt_reconnect_timer.expired.connect(
+      mem_fun(*this, &Reflector::onMqttReconnectTimer));
+#endif
+
 } /* Reflector::Reflector */
 
 
@@ -289,6 +301,13 @@ Reflector::~Reflector(void)
   ReflectorClient::cleanup();
   delete TGHandler::instance();
   delete m_remote_user_auth;
+  m_remote_user_auth = 0;
+  
+  // Cleanup curl globally after RemoteUserAuth is destroyed
+  // Could also be in main(), but either one or, not both
+  RemoteUserAuth::curlGlobalCleanup();
+  
+  // MQTT Cleanup, disconnect, clear online/offline, lwt, etc...
 #ifdef HAVE_MQTT
   if (m_mqtt_client) {
       if (m_mqtt_client->isConnected()) {
@@ -415,6 +434,7 @@ bool Reflector::initialize(Async::Config &cfg)
 
   m_cfg->valueUpdated.connect(sigc::mem_fun(*this, &Reflector::cfgUpdated));
 
+  // Remote user auth config options
   m_remote_auth_enable = false;
   m_cfg->getValue("REMOTE_USER_AUTH", "USER_AUTH_ENABLE", m_remote_auth_enable);
   if (m_remote_auth_enable)
@@ -434,6 +454,7 @@ bool Reflector::initialize(Async::Config &cfg)
     }
   }
 
+  // MQTT config options
 #ifdef HAVE_MQTT
   bool mqtt_enabled = false;
   cfg.getValue("MQTT", "MQTT_ENABLED", mqtt_enabled);
@@ -456,6 +477,10 @@ bool Reflector::initialize(Async::Config &cfg)
     string server_uri = (mqtt_ssl_enabled ? "ssl://" : "tcp://") + mqtt_host + ":" + to_string(mqtt_port);
     string client_id = "svxreflector-" + to_string(getpid()); 
     
+    // this should always com after loadCertificateFiles() because we use a digest of
+    // this server cert pub key as an ID for the reflector in MQTT.
+    // If none exists, this will be empty.... it shouldn't but better safe than sorry...
+    // or should we exit with an error ?!?!?! :/
     std::string reflector_id = getReflectorId();
     if (!reflector_id.empty()) 
     {
@@ -559,7 +584,7 @@ bool Reflector::initialize(Async::Config &cfg)
   return true;
 } /* Reflector::initialize */
 
-
+// MQTT Implementation
 #ifdef HAVE_MQTT
 void Reflector::onMqttReconnectTimer(Async::Timer* t)
 {
@@ -592,6 +617,7 @@ void Reflector::startMqttReconnect(void)
   }
 }
 
+// Calculates the server ID based on the server cert pub key
 std::string Reflector::getReflectorId()
 {
   std::string cert_cn;
@@ -709,6 +735,8 @@ void Reflector::publishOfflineClients()
 }
 #endif
 
+// Added this so that ReflectorClient can call when it's authenticated and we
+// publish to the online status it's online.
 void Reflector::onClientAuthenticated(ReflectorClient* client)
 {
 #ifdef HAVE_MQTT

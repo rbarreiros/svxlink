@@ -1,6 +1,6 @@
 /**
 @file	 RemoteUserAuth.cpp
-@brief   Async wrapper for Paho MQTT C++ client
+@brief   Remote User Authentication
 @author  Rui Barreiros / CR7BPM
 @date	 2026-01-07
 
@@ -35,6 +35,33 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 using namespace std;
 using namespace Async;
 
+// Constants, this could later on be configurable...
+static const int MAX_RETRIES = 2;
+static const long CONNECT_TIMEOUT_SECS = 5;
+static const long LOW_SPEED_TIME_SECS = 10;
+static const long LOW_SPEED_LIMIT_BPS = 100;
+static const long TIMEOUT_SECS = 10;
+
+// Static methods for global curl init/cleanup
+bool RemoteUserAuth::curlGlobalInit(void)
+{
+  CURLcode res = curl_global_init(CURL_GLOBAL_DEFAULT);
+  if (res != CURLE_OK)
+  {
+    cerr << "*** ERROR: curl_global_init() failed: "
+         << curl_easy_strerror(res) << endl;
+    return false;
+  }
+  cout << "RemoteUserAuth: global curl initialized" << endl;
+  return true;
+}
+
+void RemoteUserAuth::curlGlobalCleanup(void)
+{
+  curl_global_cleanup();
+  cout << "RemoteUserAuth: global curl cleaned up" << endl;
+}
+
 void RemoteUserAuth::setParams(const string& auth_url, const string& auth_token,
                                bool force_valid_ssl)
 {
@@ -45,51 +72,70 @@ void RemoteUserAuth::setParams(const string& auth_url, const string& auth_token,
 
 
 RemoteUserAuth::RemoteUserAuth(void)
-  : m_force_valid_ssl(true), m_update_timer(100, Timer::TYPE_PERIODIC, false)
+  : m_force_valid_ssl(true), m_timeout_timer(0, Timer::TYPE_ONESHOT, false),
+    m_total_requests(0), m_failed_requests(0), m_retried_requests(0)
 {
-  curl_global_init(CURL_GLOBAL_DEFAULT);
   m_multi_handle = curl_multi_init();
-  m_update_timer.expired.connect(sigc::mem_fun(*this, &RemoteUserAuth::onTimeout));
+  if (!m_multi_handle)
+  {
+    cerr << "*** ERROR: curl_multi_init() failed" << endl;
+    return;
+  }
+  
+  // Set up socket action API callbacks
+  curl_multi_setopt(m_multi_handle, CURLMOPT_SOCKETFUNCTION, 
+                    &RemoteUserAuth::socketCallback);
+  curl_multi_setopt(m_multi_handle, CURLMOPT_SOCKETDATA, this);
+  curl_multi_setopt(m_multi_handle, CURLMOPT_TIMERFUNCTION,
+                    &RemoteUserAuth::timerCallback);
+  curl_multi_setopt(m_multi_handle, CURLMOPT_TIMERDATA, this);
+  
+  m_timeout_timer.expired.connect(sigc::mem_fun(*this, &RemoteUserAuth::onCurlTimer));
 }
 
 RemoteUserAuth::~RemoteUserAuth(void)
 {
-  m_update_timer.setEnable(false);
+  m_timeout_timer.setEnable(false);
   
-  for (auto const& [curl, req] : m_request_map)
+  // Clean all pending requests
+  for (auto& [curl, req] : m_request_map)
   {
     curl_multi_remove_handle(m_multi_handle, curl);
     curl_easy_cleanup(curl);
     curl_slist_free_all(req->headers);
-    delete req;
   }
   m_request_map.clear();
 
-  for (auto const& [fd, ws] : m_watch_map)
-  {
-    delete ws;
-  }
+  // Clean all watches
   m_watch_map.clear();
 
-  curl_multi_cleanup(m_multi_handle);
-  curl_global_cleanup();
+  if (m_multi_handle)
+  {
+    curl_multi_cleanup(m_multi_handle);
+  }
 }
 
 void RemoteUserAuth::checkUser(const string& username, const string& digest,
                                const string& challenge,
                                sigc::slot<void(bool, string)> callback)
 {
+  m_total_requests++;
+  
   CURL* curl = curl_easy_init();
   if (!curl)
   {
+    m_failed_requests++;
     callback(false, "Failed to initialize curl");
     return;
   }
 
-  Request* req = new Request();
+  auto req = std::make_unique<Request>();
   req->curl = curl;
   req->callback = callback;
   req->headers = NULL;
+  req->retry_count = 0;
+  req->start_time = std::chrono::steady_clock::now();
+  req->username = username;
 
   Json::Value root;
   root["username"] = username;
@@ -107,9 +153,15 @@ void RemoteUserAuth::checkUser(const string& username, const string& digest,
   curl_easy_setopt(curl, CURLOPT_POSTFIELDS, req->post_data.c_str());
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, req->headers);
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, &RemoteUserAuth::writeCallback);
-  curl_easy_setopt(curl, CURLOPT_WRITEDATA, req);
-  curl_easy_setopt(curl, CURLOPT_PRIVATE, req);
-  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, req.get());
+  curl_easy_setopt(curl, CURLOPT_PRIVATE, req.get());
+  
+  // timeout settings
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, TIMEOUT_SECS);
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, CONNECT_TIMEOUT_SECS);
+  curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, LOW_SPEED_TIME_SECS);
+  curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, LOW_SPEED_LIMIT_BPS);
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
   if (!m_force_valid_ssl)
   {
@@ -117,118 +169,151 @@ void RemoteUserAuth::checkUser(const string& username, const string& digest,
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
   }
 
-  m_request_map[curl] = req;
+  cout << username << ": Starting remote authentication request..." << endl;
+
+  // Transfer ownership to map
+  m_request_map[curl] = std::move(req);
+  
   curl_multi_add_handle(m_multi_handle, curl);
 
-  updateWatchMap();
-  m_update_timer.setEnable(true);
+  // Kick off the multi interface
+  int running_handles;
+  curl_multi_socket_action(m_multi_handle, CURL_SOCKET_TIMEOUT, 0, &running_handles);
 }
 
-void RemoteUserAuth::onTimeout(Timer *timer)
+void RemoteUserAuth::onCurlTimer(Timer *timer)
 {
   int running_handles;
-  curl_multi_perform(m_multi_handle, &running_handles);
+  curl_multi_socket_action(m_multi_handle, CURL_SOCKET_TIMEOUT, 0, &running_handles);
   checkMultiInfo();
-  updateWatchMap();
-  if (running_handles == 0)
-  {
-    m_update_timer.setEnable(false);
-  }
 }
 
-void RemoteUserAuth::onActivity(FdWatch *watch)
+void RemoteUserAuth::onSocketActivity(FdWatch *watch)
+{
+  int event_bitmask = 0;
+  if (watch->type() & FdWatch::FD_WATCH_RD)
+  {
+    event_bitmask |= CURL_CSELECT_IN;
+  }
+  if (watch->type() & FdWatch::FD_WATCH_WR)
+  {
+    event_bitmask |= CURL_CSELECT_OUT;
+  }
+  
+  performSocketAction(watch->fd(), event_bitmask);
+}
+
+void RemoteUserAuth::performSocketAction(curl_socket_t s, int event_bitmask)
 {
   int running_handles;
-  curl_multi_perform(m_multi_handle, &running_handles);
+  curl_multi_socket_action(m_multi_handle, s, event_bitmask, &running_handles);
   checkMultiInfo();
-  updateWatchMap();
-  if (running_handles == 0)
-  {
-    m_update_timer.setEnable(false);
-  }
 }
 
-void RemoteUserAuth::updateWatchMap(void)
+// called by curl when socket state changes, static
+int RemoteUserAuth::socketCallback(CURL* easy, curl_socket_t s, int what,
+                                   void* userp, void* socketp)
 {
-  fd_set fdread;
-  fd_set fdwrite;
-  fd_set fdexcep;
-  int maxfd = -1;
+  RemoteUserAuth* self = static_cast<RemoteUserAuth*>(userp);
+  return self->handleSocketAction(easy, s, what, socketp);
+}
 
-  FD_ZERO(&fdread);
-  FD_ZERO(&fdwrite);
-  FD_ZERO(&fdexcep);
-
-  curl_multi_fdset(m_multi_handle, &fdread, &fdwrite, &fdexcep, &maxfd);
-
-  // First, mark all existing watches as old
-  for (auto const& [fd, ws] : m_watch_map)
+// handle socket action from curl
+int RemoteUserAuth::handleSocketAction(CURL* easy, curl_socket_t s, int what,
+                                       void* socketp)
+{
+  if (what == CURL_POLL_REMOVE)
   {
-    ws->rd_enabled = false;
-    ws->wr_enabled = false;
-  }
-
-  for (int fd = 0; fd <= maxfd; fd++)
-  {
-    bool r_set = FD_ISSET(fd, &fdread);
-    bool w_set = FD_ISSET(fd, &fdwrite);
-
-    if (r_set || w_set)
+    // Remove the watch for this socket
+    auto it = m_watch_map.find(s);
+    if (it != m_watch_map.end())
     {
-      WatchSet* ws = m_watch_map[fd];
-      if (!ws)
-      {
-        ws = new WatchSet();
-        m_watch_map[fd] = ws;
-      }
-
-      if (r_set)
-      {
-        if (!ws->rd.isEnabled())
-        {
-          ws->rd.setFd(fd, FdWatch::FD_WATCH_RD);
-          ws->rd.activity.connect(sigc::mem_fun(*this, &RemoteUserAuth::onActivity));
-          ws->rd.setEnabled(true);
-        }
-        ws->rd_enabled = true;
-      }
-      
-      if (w_set)
-      {
-        if (!ws->wr.isEnabled())
-        {
-          ws->wr.setFd(fd, FdWatch::FD_WATCH_WR);
-          ws->wr.activity.connect(sigc::mem_fun(*this, &RemoteUserAuth::onActivity));
-          ws->wr.setEnabled(true);
-        }
-        ws->wr_enabled = true;
-      }
+      m_watch_map.erase(it);
     }
   }
-
-  // Remove watches that are no longer needed
-  for (auto it = m_watch_map.begin(); it != m_watch_map.end(); )
+  else
   {
-    WatchSet* ws = it->second;
-    if (!ws->rd_enabled && ws->rd.isEnabled())
+    // Create or update watch for this socket
+    WatchSet* ws = nullptr;
+    auto it = m_watch_map.find(s);
+    if (it == m_watch_map.end())
     {
-      ws->rd.setEnabled(false);
-    }
-    if (!ws->wr_enabled && ws->wr.isEnabled())
-    {
-      ws->wr.setEnabled(false);
-    }
-    
-    if (!ws->rd_enabled && !ws->wr_enabled)
-    {
-      delete ws;
-      it = m_watch_map.erase(it);
+      auto new_ws = std::make_unique<WatchSet>();
+      ws = new_ws.get();
+      m_watch_map[s] = std::move(new_ws);
     }
     else
     {
-      ++it;
+      ws = it->second.get();
+    }
+
+    // Update read watch
+    bool need_read = (what & CURL_POLL_IN) != 0;
+    if (need_read && !ws->rd.isEnabled())
+    {
+      ws->rd.setFd(s, FdWatch::FD_WATCH_RD);
+      ws->rd.activity.connect(sigc::mem_fun(*this, &RemoteUserAuth::onSocketActivity));
+      ws->rd.setEnabled(true);
+      ws->rd_enabled = true;
+    }
+    else if (!need_read && ws->rd.isEnabled())
+    {
+      ws->rd.setEnabled(false);
+      ws->rd_enabled = false;
+    }
+
+    // Update write watch
+    bool need_write = (what & CURL_POLL_OUT) != 0;
+    if (need_write && !ws->wr.isEnabled())
+    {
+      ws->wr.setFd(s, FdWatch::FD_WATCH_WR);
+      ws->wr.activity.connect(sigc::mem_fun(*this, &RemoteUserAuth::onSocketActivity));
+      ws->wr.setEnabled(true);
+      ws->wr_enabled = true;
+    }
+    else if (!need_write && ws->wr.isEnabled())
+    {
+      ws->wr.setEnabled(false);
+      ws->wr_enabled = false;
     }
   }
+  
+  return 0;
+}
+
+// called by curl when timeout needs updating, static
+int RemoteUserAuth::timerCallback(CURLM* multi, long timeout_ms, void* userp)
+{
+  RemoteUserAuth* self = static_cast<RemoteUserAuth*>(userp);
+  return self->handleTimerUpdate(timeout_ms);
+}
+
+// handle timer update from curl
+int RemoteUserAuth::handleTimerUpdate(long timeout_ms)
+{
+  m_timeout_timer.setEnable(false);
+  
+  if (timeout_ms < 0)
+  {
+    // No timeout needed
+    return 0;
+  }
+  
+  if (timeout_ms == 0)
+  {
+    // Call immediately
+    int running_handles;
+    curl_multi_socket_action(m_multi_handle, CURL_SOCKET_TIMEOUT, 0, &running_handles);
+    checkMultiInfo();
+  }
+  else
+  {
+    // Set timer for the specified duration
+    m_timeout_timer.setTimeout(timeout_ms);
+    m_timeout_timer.setEnable(true);
+  }
+  
+  return 0;
 }
 
 void RemoteUserAuth::checkMultiInfo(void)
@@ -240,13 +325,71 @@ void RemoteUserAuth::checkMultiInfo(void)
     if (msg->msg == CURLMSG_DONE)
     {
       CURL* curl = msg->easy_handle;
-      Request* req = m_request_map[curl];
-      if (req)
+      auto it = m_request_map.find(curl);
+      if (it == m_request_map.end())
       {
-        bool success = false;
-        string message = "Unknown error";
+        continue;  // Request not found
+      }
+      
+      Request* req = it->second.get();
+      bool success = false;
+      string message = "Unknown error";
+      
+      // Calculate request duration
+      auto end_time = std::chrono::steady_clock::now();
+      auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+        end_time - req->start_time);
+      
+      CURLcode result = msg->data.result;
+      
+      // Check if we should retry
+      bool should_retry = false;
+      if (result != CURLE_OK && req->retry_count < MAX_RETRIES)
+      {
+        if (result == CURLE_COULDNT_CONNECT ||
+            result == CURLE_OPERATION_TIMEDOUT ||
+            result == CURLE_COULDNT_RESOLVE_HOST)
+        {
+          should_retry = true;
+        }
+      }
+      
+      if (should_retry)
+      {
+        cout << req->username << ": Request failed (" 
+             << curl_easy_strerror(result)
+             << "), retrying (attempt " << (req->retry_count + 2) << "/"
+             << (MAX_RETRIES + 1) << ")..." << endl;
         
-        if (msg->data.result == CURLE_OK)
+        req->retry_count++;
+        m_retried_requests++;
+        
+        // Retry the request - move ownership temporarily
+        auto req_unique = std::move(it->second);
+        m_request_map.erase(it);
+        
+        curl_multi_remove_handle(m_multi_handle, curl);
+        curl_multi_add_handle(m_multi_handle, curl);
+        
+        // Put it back
+        m_request_map[curl] = std::move(req_unique);
+        
+        int running_handles;
+        curl_multi_socket_action(m_multi_handle, CURL_SOCKET_TIMEOUT, 0, 
+                                &running_handles);
+        continue;
+      }
+      
+      if (result == CURLE_OK)
+      {
+        // Get HTTP response code
+        long http_code = 0;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+        
+        cout << req->username << ": Remote auth response received (HTTP "
+             << http_code << ", " << duration.count() << "ms)" << endl;
+        
+        if (http_code >= 200 && http_code < 300)
         {
           Json::Value root;
           Json::CharReaderBuilder rbuilder;
@@ -255,27 +398,69 @@ void RemoteUserAuth::checkMultiInfo(void)
           
           if (Json::parseFromStream(rbuilder, iss, &root, &errs))
           {
-            success = root["success"].asBool();
-            message = root["message"].asString();
+            // field validation! or this will crash on wrong json!
+            if (root.isMember("success") && root["success"].isBool())
+            {
+              success = root["success"].asBool();
+            }
+            else
+            {
+              cout << "*** WARNING[" << req->username 
+                   << "]: 'success' field missing or invalid in JSON response"
+                   << endl;
+              success = false;
+            }
+            
+            if (root.isMember("message") && root["message"].isString())
+            {
+              message = root["message"].asString();
+            }
+            else
+            {
+              message = success ? "Authentication successful" 
+                                : "Authentication failed (no message)";
+            }
           }
           else
           {
             message = "Failed to parse JSON response: " + errs;
+            cout << "*** WARNING[" << req->username << "]: " << message << endl;
           }
         }
         else
         {
-          message = string("CURL error: ") + curl_easy_strerror(msg->data.result);
+          message = string("HTTP error: ") + std::to_string(http_code);
+          cout << "*** WARNING[" << req->username << "]: " << message << endl;
         }
-
-        req->callback(success, message);
-
-        curl_multi_remove_handle(m_multi_handle, curl);
-        curl_easy_cleanup(curl);
-        curl_slist_free_all(req->headers);
-        m_request_map.erase(curl);
-        delete req;
       }
+      else
+      {
+        message = string("CURL error: ") + curl_easy_strerror(result);
+        cout << "*** WARNING[" << req->username << "]: " << message 
+             << " (after " << duration.count() << "ms)" << endl;
+        m_failed_requests++;
+      }
+
+      // may throw, but that's ok with unique_ptr....
+      try
+      {
+        req->callback(success, message);
+      }
+      catch (const std::exception& e)
+      {
+        cerr << "*** ERROR: Exception in RemoteUserAuth callback: " 
+             << e.what() << endl;
+      }
+      catch (...)
+      {
+        cerr << "*** ERROR: Unknown exception in RemoteUserAuth callback" << endl;
+      }
+
+      // unique_ptr handles deletion
+      curl_multi_remove_handle(m_multi_handle, curl);
+      curl_easy_cleanup(curl);
+      curl_slist_free_all(req->headers);
+      m_request_map.erase(it);
     }
   }
 }

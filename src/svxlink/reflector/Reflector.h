@@ -61,7 +61,6 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  ****************************************************************************/
 
-#include "RemoteUserAuth.h"
 #include "ReflectorClient.h"
 #include "ProtoVer.h"
 
@@ -88,7 +87,7 @@ namespace Async
 
 class ReflectorMsg;
 class ReflectorUdpMsg;
-
+class RemoteUserAuth;
 
 /****************************************************************************
  *
