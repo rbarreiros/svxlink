@@ -45,6 +45,7 @@ add_executable(svxreflector
   RemoteUserAuth.cpp
 )
 target_link_libraries(svxreflector ${LIBS} ${CURL_LIBRARIES})
+target_compile_features(svxreflector PRIVATE cxx_std_17)
 set_target_properties(svxreflector PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY ${RUNTIME_OUTPUT_DIRECTORY}
 )

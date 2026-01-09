@@ -135,16 +135,17 @@ class RemoteUserAuth : public sigc::trackable
      *          This could actually be called in the main() function, it
      *          should only be called once per application! But since Reflector
      *          class is ran only once, it's ok!
-
+     *
      * @return  True on success, false on failure
      */
     static bool curlGlobalInit(void);
 
+
     /**
      * @brief   Cleanup curl globally (call once at application shutdown)
-
+     *
      *          This could actually be called in the main() function, like
-     *          curlGlobalInit, it should only be called once per application! 
+     *          curlGlobalInit, it should only be called once per application!
      *          But since Reflector class is ran only once, it's ok!
      */
     static void curlGlobalCleanup(void);
@@ -246,7 +247,8 @@ class RemoteUserAuth : public sigc::trackable
     int handleTimerUpdate(long timeout_ms);
     void performSocketAction(curl_socket_t s, int event_bitmask);
     
-    static size_t writeCallback(void *contents, size_t size, size_t nmemb, void *userp);
+    static size_t writeCallback(void *contents, size_t size, size_t nmemb,
+                                void *userp);
 
 };  /* class RemoteUserAuth */
 

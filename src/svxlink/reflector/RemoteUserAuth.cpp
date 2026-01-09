@@ -24,25 +24,95 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 \endverbatim
 */
 
+
+/****************************************************************************
+ *
+ * System Includes
+ *
+ ****************************************************************************/
+
 #include <iostream>
 #include <sstream>
 #include <cstring>
+#include <memory>
 #include <json/json.h>
 #include <curl/curl.h>
 
+
+/****************************************************************************
+ *
+ * Project Includes
+ *
+ ****************************************************************************/
+
+
+/****************************************************************************
+ *
+ * Local Includes
+ *
+ ****************************************************************************/
+
 #include "RemoteUserAuth.h"
+
+
+/****************************************************************************
+ *
+ * Namespaces to use
+ *
+ ****************************************************************************/
 
 using namespace std;
 using namespace Async;
 
-// Constants, this could later on be configurable...
-static const int MAX_RETRIES = 2;
-static const long CONNECT_TIMEOUT_SECS = 5;
-static const long LOW_SPEED_TIME_SECS = 10;
-static const long LOW_SPEED_LIMIT_BPS = 100;
-static const long TIMEOUT_SECS = 10;
 
-// Static methods for global curl init/cleanup
+/****************************************************************************
+ *
+ * Defines & typedefs
+ *
+ ****************************************************************************/
+
+// Constants, this could later on be configurable...
+static const int  MAX_RETRIES            = 2;
+static const long CONNECT_TIMEOUT_SECS   = 5;
+static const long LOW_SPEED_TIME_SECS    = 10;
+static const long LOW_SPEED_LIMIT_BPS    = 100;
+static const long TIMEOUT_SECS           = 10;
+
+
+/****************************************************************************
+ *
+ * Local class definitions
+ *
+ ****************************************************************************/
+
+
+/****************************************************************************
+ *
+ * Local functions
+ *
+ ****************************************************************************/
+
+
+/****************************************************************************
+ *
+ * Exported Global Variables
+ *
+ ****************************************************************************/
+
+
+/****************************************************************************
+ *
+ * Local Global Variables
+ *
+ ****************************************************************************/
+
+
+/****************************************************************************
+ *
+ * Public static functions
+ *
+ ****************************************************************************/
+
 bool RemoteUserAuth::curlGlobalInit(void)
 {
   CURLcode res = curl_global_init(CURL_GLOBAL_DEFAULT);
@@ -54,22 +124,21 @@ bool RemoteUserAuth::curlGlobalInit(void)
   }
   cout << "RemoteUserAuth: global curl initialized" << endl;
   return true;
-}
+} /* RemoteUserAuth::curlGlobalInit */
+
 
 void RemoteUserAuth::curlGlobalCleanup(void)
 {
   curl_global_cleanup();
   cout << "RemoteUserAuth: global curl cleaned up" << endl;
-}
+} /* RemoteUserAuth::curlGlobalCleanup */
 
-void RemoteUserAuth::setParams(const string& auth_url, const string& auth_token,
-                               bool force_valid_ssl)
-{
-  m_auth_url = auth_url;
-  m_auth_token = auth_token;
-  m_force_valid_ssl = force_valid_ssl;
-}
 
+/****************************************************************************
+ *
+ * Public member functions
+ *
+ ****************************************************************************/
 
 RemoteUserAuth::RemoteUserAuth(void)
   : m_force_valid_ssl(true), m_timeout_timer(0, Timer::TYPE_ONESHOT, false),
@@ -91,7 +160,8 @@ RemoteUserAuth::RemoteUserAuth(void)
   curl_multi_setopt(m_multi_handle, CURLMOPT_TIMERDATA, this);
   
   m_timeout_timer.expired.connect(sigc::mem_fun(*this, &RemoteUserAuth::onCurlTimer));
-}
+} /* RemoteUserAuth::RemoteUserAuth */
+
 
 RemoteUserAuth::~RemoteUserAuth(void)
 {
@@ -113,7 +183,17 @@ RemoteUserAuth::~RemoteUserAuth(void)
   {
     curl_multi_cleanup(m_multi_handle);
   }
-}
+} /* RemoteUserAuth::~RemoteUserAuth */
+
+
+void RemoteUserAuth::setParams(const string& auth_url, const string& auth_token,
+                               bool force_valid_ssl)
+{
+  m_auth_url = auth_url;
+  m_auth_token = auth_token;
+  m_force_valid_ssl = force_valid_ssl;
+} /* RemoteUserAuth::setParams */
+
 
 void RemoteUserAuth::checkUser(const string& username, const string& digest,
                                const string& challenge,
@@ -179,14 +259,29 @@ void RemoteUserAuth::checkUser(const string& username, const string& digest,
   // Kick off the multi interface
   int running_handles;
   curl_multi_socket_action(m_multi_handle, CURL_SOCKET_TIMEOUT, 0, &running_handles);
-}
+} /* RemoteUserAuth::checkUser */
+
+
+/****************************************************************************
+ *
+ * Protected member functions
+ *
+ ****************************************************************************/
+
+
+/****************************************************************************
+ *
+ * Private member functions
+ *
+ ****************************************************************************/
 
 void RemoteUserAuth::onCurlTimer(Timer *timer)
 {
   int running_handles;
   curl_multi_socket_action(m_multi_handle, CURL_SOCKET_TIMEOUT, 0, &running_handles);
   checkMultiInfo();
-}
+} /* RemoteUserAuth::onCurlTimer */
+
 
 void RemoteUserAuth::onSocketActivity(FdWatch *watch)
 {
@@ -201,14 +296,16 @@ void RemoteUserAuth::onSocketActivity(FdWatch *watch)
   }
   
   performSocketAction(watch->fd(), event_bitmask);
-}
+} /* RemoteUserAuth::onSocketActivity */
+
 
 void RemoteUserAuth::performSocketAction(curl_socket_t s, int event_bitmask)
 {
   int running_handles;
   curl_multi_socket_action(m_multi_handle, s, event_bitmask, &running_handles);
   checkMultiInfo();
-}
+} /* RemoteUserAuth::performSocketAction */
+
 
 // called by curl when socket state changes, static
 int RemoteUserAuth::socketCallback(CURL* easy, curl_socket_t s, int what,
@@ -216,7 +313,8 @@ int RemoteUserAuth::socketCallback(CURL* easy, curl_socket_t s, int what,
 {
   RemoteUserAuth* self = static_cast<RemoteUserAuth*>(userp);
   return self->handleSocketAction(easy, s, what, socketp);
-}
+} /* RemoteUserAuth::socketCallback */
+
 
 // handle socket action from curl
 int RemoteUserAuth::handleSocketAction(CURL* easy, curl_socket_t s, int what,
@@ -279,14 +377,16 @@ int RemoteUserAuth::handleSocketAction(CURL* easy, curl_socket_t s, int what,
   }
   
   return 0;
-}
+} /* RemoteUserAuth::handleSocketAction */
+
 
 // called by curl when timeout needs updating, static
 int RemoteUserAuth::timerCallback(CURLM* multi, long timeout_ms, void* userp)
 {
   RemoteUserAuth* self = static_cast<RemoteUserAuth*>(userp);
   return self->handleTimerUpdate(timeout_ms);
-}
+} /* RemoteUserAuth::timerCallback */
+
 
 // handle timer update from curl
 int RemoteUserAuth::handleTimerUpdate(long timeout_ms)
@@ -314,7 +414,8 @@ int RemoteUserAuth::handleTimerUpdate(long timeout_ms)
   }
   
   return 0;
-}
+} /* RemoteUserAuth::handleTimerUpdate */
+
 
 void RemoteUserAuth::checkMultiInfo(void)
 {
@@ -463,12 +564,14 @@ void RemoteUserAuth::checkMultiInfo(void)
       m_request_map.erase(it);
     }
   }
-}
+} /* RemoteUserAuth::checkMultiInfo */
 
-size_t RemoteUserAuth::writeCallback(void *contents, size_t size, size_t nmemb, void *userp)
+
+size_t RemoteUserAuth::writeCallback(void *contents, size_t size, size_t nmemb,
+                                     void *userp)
 {
   size_t realsize = size * nmemb;
   Request* req = static_cast<Request*>(userp);
   req->response_data.append(static_cast<char*>(contents), realsize);
   return realsize;
-}
+} /* RemoteUserAuth::writeCallback */
