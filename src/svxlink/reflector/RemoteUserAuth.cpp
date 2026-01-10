@@ -420,17 +420,17 @@ int RemoteUserAuth::handleTimerUpdate(long timeout_ms)
   
   if (timeout_ms == 0)
   {
-    // Call immediately
-    int running_handles;
-    curl_multi_socket_action(m_multi_handle, CURL_SOCKET_TIMEOUT, 0, &running_handles);
-    checkMultiInfo();
+    // Schedule immediately (next event loop iteration) to break recursion
+    // if this was called from within a curl callback (e.g. add_handle)
+    timeout_ms = 0;
   }
   else
   {
     // Set timer for the specified duration
-    m_timeout_timer.setTimeout(timeout_ms);
-    m_timeout_timer.setEnable(true);
   }
+  
+  m_timeout_timer.setTimeout(timeout_ms);
+  m_timeout_timer.setEnable(true);
   
   return 0;
 } /* RemoteUserAuth::handleTimerUpdate */
