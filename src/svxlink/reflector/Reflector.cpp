@@ -239,7 +239,7 @@ Reflector::Reflector(void)
     m_keys_dir("private/"), m_pending_csrs_dir("pending_csrs/"),
     m_csrs_dir("csrs/"), m_certs_dir("certs/"), m_pki_dir("pki/"),
     m_remote_auth_enable(false),
-    m_remote_user_auth(new RemoteUserAuth()) // remote user auth
+    m_remote_user_auth(nullptr) // remote user auth
 #ifdef HAVE_MQTT
     , m_mqtt_client(nullptr)
     , m_mqtt_reconnect_timer(0, Async::Timer::TYPE_ONESHOT, false)
@@ -247,12 +247,15 @@ Reflector::Reflector(void)
 #endif
 {
   // Initialize curl globally for RemoteUserAuth
-  // Could be in main()...
+  // Must be called before any other curl functions (like creating RemoteUserAuth)
   if (!RemoteUserAuth::curlGlobalInit())
   {
     std::cerr << "*** WARNING: curl global initialization failed. "
               << "Remote user authentication will not work." << std::endl;
   }
+
+  // Now that curl is initialized, create the auth object
+  m_remote_user_auth = new RemoteUserAuth();
   
   TGHandler::instance()->talkerUpdated.connect(
       mem_fun(*this, &Reflector::onTalkerUpdated));

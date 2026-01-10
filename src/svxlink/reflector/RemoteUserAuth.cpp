@@ -147,7 +147,7 @@ RemoteUserAuth::RemoteUserAuth(void)
   m_multi_handle = curl_multi_init();
   if (!m_multi_handle)
   {
-    cerr << "*** ERROR: curl_multi_init() failed" << endl;
+    cerr << "*** ERROR: curl_multi_init() failed. RemoteUserAuth will not function." << endl;
     return;
   }
   
@@ -182,6 +182,7 @@ RemoteUserAuth::~RemoteUserAuth(void)
   if (m_multi_handle)
   {
     curl_multi_cleanup(m_multi_handle);
+    m_multi_handle = nullptr;
   }
 } /* RemoteUserAuth::~RemoteUserAuth */
 
@@ -199,6 +200,12 @@ void RemoteUserAuth::checkUser(const string& username, const string& digest,
                                const string& challenge,
                                sigc::slot<void(bool, string)> callback)
 {
+  if (!m_multi_handle)
+  {
+    cerr << "*** ERROR[" << username << "]: Remote auth failed - libcurl not initialized" << endl;
+    callback(false, "Internal error: libcurl not initialized");
+    return;
+  }
   m_total_requests++;
   
   CURL* curl = curl_easy_init();
@@ -277,6 +284,10 @@ void RemoteUserAuth::checkUser(const string& username, const string& digest,
 
 void RemoteUserAuth::onCurlTimer(Timer *timer)
 {
+  if (!m_multi_handle)
+  {
+    return;
+  }
   int running_handles;
   curl_multi_socket_action(m_multi_handle, CURL_SOCKET_TIMEOUT, 0, &running_handles);
   checkMultiInfo();
@@ -320,6 +331,10 @@ int RemoteUserAuth::socketCallback(CURL* easy, curl_socket_t s, int what,
 int RemoteUserAuth::handleSocketAction(CURL* easy, curl_socket_t s, int what,
                                        void* socketp)
 {
+  if (!m_multi_handle)
+  {
+    return -1;
+  }
   if (what == CURL_POLL_REMOVE)
   {
     // Remove the watch for this socket
@@ -391,6 +406,10 @@ int RemoteUserAuth::timerCallback(CURLM* multi, long timeout_ms, void* userp)
 // handle timer update from curl
 int RemoteUserAuth::handleTimerUpdate(long timeout_ms)
 {
+  if (!m_multi_handle)
+  {
+    return -1;
+  }
   m_timeout_timer.setEnable(false);
   
   if (timeout_ms < 0)
