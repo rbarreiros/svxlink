@@ -235,6 +235,7 @@ class Logic : public LogicBase
     void rptValveSetOpen(bool do_open);
     void checkIdle(void);
     void setTxCtrlMode(Tx::TxCtrlMode mode);
+    bool isDtmfIdWaiting() const;  // DTMF ID Rui Barreiros
 
   private:
 
@@ -332,7 +333,6 @@ class Logic : public LogicBase
     // DTMF ID Rui Barreiros
     bool validateDtmfId(const std::string& id);
     void resetDtmfIdState();
-    bool isDtmfIdWaiting() const;
 
 };  /* class Logic */
 

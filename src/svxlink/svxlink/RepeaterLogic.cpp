@@ -552,7 +552,13 @@ void RepeaterLogic::setUp(bool up, string reason)
     processEvent(ss.str());
     
     rxValveSetOpen(true);
-    setTxCtrlMode(Tx::TX_ON);
+    // DTMF ID Rui Barreiros
+    // Only enable TX if DTMF ID is not enabled, or if already validated
+    if (!isDtmfIdWaiting())
+    {
+      setTxCtrlMode(Tx::TX_ON);
+    }
+    // If DTMF ID is waiting, TX will be enabled after validation
     
     setIdle(false);
     checkIdle();
