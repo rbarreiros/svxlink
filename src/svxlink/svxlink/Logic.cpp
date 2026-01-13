@@ -1105,7 +1105,7 @@ Logic::~Logic(void)
 void Logic::squelchOpen(bool is_open)
 {
   //std::cout << "### Logic::squelchOpen: is_open=" << is_open << std::endl;
-
+  
   if (active_module != 0)
   {
     active_module->squelchOpen(is_open);
@@ -1127,6 +1127,7 @@ void Logic::squelchOpen(bool is_open)
       m_dtmf_id_buffer.clear();
       m_dtmf_id_current_user.clear();
       rxValveSetOpen(false);  // Block audio until ID is validated
+      setTxCtrlMode(Tx::TX_OFF);  // Disable transmitter until ID is validated
       cout << name() << ": Waiting for DTMF ID from user" << endl;
     }
   }
@@ -1145,6 +1146,7 @@ void Logic::squelchOpen(bool is_open)
     {
       resetDtmfIdState();
       rxValveSetOpen(true);  // Restore normal RX valve state
+      setTxCtrlMode(Tx::TX_AUTO);  // Restore normal TX control
     }
     
     const string &received_digits = dtmf_digit_handler->command();
@@ -1802,6 +1804,7 @@ void Logic::dtmfDigitDetectedP(char digit, int duration)
         {
           m_dtmf_id_state = ID_VALIDATED;
           rxValveSetOpen(true);  // Allow audio through
+          setTxCtrlMode(Tx::TX_AUTO);  // Enable transmitter
           cout << name() << ": User " << m_dtmf_id_current_user 
                << " authenticated with ID " << m_dtmf_id_buffer << endl;
             // Continue with normal DTMF processing below
