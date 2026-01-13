@@ -1106,6 +1106,18 @@ void Logic::squelchOpen(bool is_open)
 {
   //std::cout << "### Logic::squelchOpen: is_open=" << is_open << std::endl;
   
+  // DTMF ID Rui Barreiros
+  // Handle DTMF ID state FIRST, before any other processing
+  if (is_open && m_dtmf_id_enable)
+  {
+    m_dtmf_id_state = ID_WAITING;
+    m_dtmf_id_buffer.clear();
+    m_dtmf_id_current_user.clear();
+    rxValveSetOpen(false);  // Block audio until ID is validated
+    setTxCtrlMode(Tx::TX_OFF);  // Disable transmitter until ID is validated
+    cout << name() << ": Waiting for DTMF ID from user" << endl;
+  }
+  
   if (active_module != 0)
   {
     active_module->squelchOpen(is_open);
@@ -1119,17 +1131,6 @@ void Logic::squelchOpen(bool is_open)
   if (is_open)
   {
     exec_cmd_on_sql_close_timer.setEnable(false);
-    
-      // Start DTMF ID collection if enabled
-    if (m_dtmf_id_enable)
-    {
-      m_dtmf_id_state = ID_WAITING;
-      m_dtmf_id_buffer.clear();
-      m_dtmf_id_current_user.clear();
-      rxValveSetOpen(false);  // Block audio until ID is validated
-      setTxCtrlMode(Tx::TX_OFF);  // Disable transmitter until ID is validated
-      cout << name() << ": Waiting for DTMF ID from user" << endl;
-    }
   }
   else
   {
