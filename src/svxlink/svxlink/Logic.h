@@ -244,6 +244,12 @@ class Logic : public LogicBase
       TX_CTCSS_MODULE=8, TX_CTCSS_ANNOUNCEMENT=16
     } TxCtcssType;
 
+    // DTMF ID Rui Barreiros
+    typedef enum
+    {
+      ID_IDLE, ID_WAITING, ID_VALIDATED, ID_REJECTED
+    } DtmfIdState;
+
     Rx	      	      	      	    *m_rx;
     Tx	      	      	      	    *m_tx;
     MsgHandler	      	      	    *msg_handler;
@@ -293,6 +299,12 @@ class Logic : public LogicBase
     Async::Timer                    m_ctcss_to_tg_timer;
     float                           m_ctcss_to_tg_last_fq;
     std::string                     m_macro_prefix                {"D"};
+    // DTMF ID Rui Barreiros
+    bool                            m_dtmf_id_enable              {false};
+    std::map<std::string, std::string> m_dtmf_id_users;
+    DtmfIdState                     m_dtmf_id_state               {ID_IDLE};
+    std::string                     m_dtmf_id_buffer;
+    std::string                     m_dtmf_id_current_user;
 
     void loadModules(void);
     void loadModule(const std::string& module_name);
@@ -317,6 +329,10 @@ class Logic : public LogicBase
     bool getConfigValue(const std::string& section, const std::string& tag,
                         std::string& value);
     void signalLevelUpdated(float siglev);
+    // DTMF ID Rui Barreiros
+    bool validateDtmfId(const std::string& id);
+    void resetDtmfIdState();
+    bool isDtmfIdWaiting() const;
 
 };  /* class Logic */
 

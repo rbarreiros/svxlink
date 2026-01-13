@@ -753,6 +753,37 @@ bool Logic::initialize(Async::Config& cfgobj, const std::string& logic_name)
 
   cfg().valueUpdated.connect(sigc::mem_fun(*this, &Logic::cfgUpdated));
 
+  // Parse DTMF ID configuration
+  // Rui Barreiros
+  cfg().getValue(name(), "DTMF_ID_ENABLE", m_dtmf_id_enable);
+  if (m_dtmf_id_enable)
+  {
+    std::string dtmf_id_users_section;
+    if (cfg().getValue(name(), "DTMF_ID_USERS", dtmf_id_users_section))
+    {
+      const auto& user_list = cfg().listSection(dtmf_id_users_section);
+      for (const auto& callsign : user_list)
+      {
+        std::string dtmf_id;
+        if (cfg().getValue(dtmf_id_users_section, callsign, dtmf_id))
+        {
+          m_dtmf_id_users[callsign] = dtmf_id;
+          cout << name() << ": DTMF ID user: " << callsign << " = " << dtmf_id << endl;
+        }
+      }
+      if (m_dtmf_id_users.empty())
+      {
+        cerr << "*** WARNING: DTMF_ID_ENABLE is set but no users defined in "
+             << dtmf_id_users_section << endl;
+      }
+    }
+    else
+    {
+      cerr << "*** WARNING: DTMF_ID_ENABLE is set but DTMF_ID_USERS section not specified" << endl;
+      m_dtmf_id_enable = false;
+    }
+  }
+
   return true;
 
 } /* Logic::initialize */
@@ -1088,9 +1119,34 @@ void Logic::squelchOpen(bool is_open)
   if (is_open)
   {
     exec_cmd_on_sql_close_timer.setEnable(false);
+    
+      // Start DTMF ID collection if enabled
+    if (m_dtmf_id_enable)
+    {
+      m_dtmf_id_state = ID_WAITING;
+      m_dtmf_id_buffer.clear();
+      m_dtmf_id_current_user.clear();
+      rxValveSetOpen(false);  // Block audio until ID is validated
+      cout << name() << ": Waiting for DTMF ID from user" << endl;
+    }
   }
   else
   {
+    // DTMF ID Rui Barreiros
+    // Squelch closed - check if we were waiting for or rejected an ID
+    if (m_dtmf_id_enable && 
+        (m_dtmf_id_state == ID_WAITING || m_dtmf_id_state == ID_REJECTED))
+    {
+      cout << name() << ": Transmission rejected - no valid DTMF ID received" << endl;
+    }
+    
+      // Reset ID state machine
+    if (m_dtmf_id_enable)
+    {
+      resetDtmfIdState();
+      rxValveSetOpen(true);  // Restore normal RX valve state
+    }
+    
     const string &received_digits = dtmf_digit_handler->command();
     if (!dtmf_digit_handler->antiFlutterActive() &&
         !received_digits.empty())
@@ -1727,6 +1783,46 @@ void Logic::dtmfDigitDetectedP(char digit, int duration)
     return;
   }
 
+  // Handle DTMF ID state machine
+  // Rui Barreiros
+  if (m_dtmf_id_enable)
+  {
+    if (m_dtmf_id_state == ID_WAITING)
+    {
+        // Collecting DTMF ID
+      if (digit != '#')
+      {
+        m_dtmf_id_buffer += digit;
+        return;  // Don't pass DTMF to modules during ID collection
+      }
+      else
+      {
+          // End of ID - validate
+        if (validateDtmfId(m_dtmf_id_buffer))
+        {
+          m_dtmf_id_state = ID_VALIDATED;
+          rxValveSetOpen(true);  // Allow audio through
+          cout << name() << ": User " << m_dtmf_id_current_user 
+               << " authenticated with ID " << m_dtmf_id_buffer << endl;
+            // Continue with normal DTMF processing below
+        }
+        else
+        {
+          m_dtmf_id_state = ID_REJECTED;
+          cout << name() << ": Invalid DTMF ID: " << m_dtmf_id_buffer 
+               << " - rejecting transmission" << endl;
+          return;  // Don't process DTMF further
+        }
+      }
+    }
+    else if (m_dtmf_id_state == ID_REJECTED)
+    {
+        // Silently ignore all DTMF if ID was rejected
+      return;
+    }
+      // If ID_VALIDATED or ID_IDLE, continue with normal DTMF processing
+  }
+
   dtmfDigitDetected(digit, duration);
 
   if (dtmf_ctrl_pty != 0)
@@ -1879,6 +1975,35 @@ void Logic::signalLevelUpdated(float siglev)
   ss << "siglev_updated " << rx().sqlRxId() << " " << siglev;
   processEvent(ss.str());
 } /* Logic::signalLevelUpdated */
+
+// DTMF ID Rui Barreiros
+
+bool Logic::validateDtmfId(const std::string& id)
+{
+  for (const auto& user : m_dtmf_id_users)
+  {
+    if (user.second == id)
+    {
+      m_dtmf_id_current_user = user.first;
+      return true;
+    }
+  }
+  return false;
+} /* Logic::validateDtmfId */
+
+
+void Logic::resetDtmfIdState()
+{
+  m_dtmf_id_state = ID_IDLE;
+  m_dtmf_id_buffer.clear();
+  m_dtmf_id_current_user.clear();
+} /* Logic::resetDtmfIdState */
+
+
+bool Logic::isDtmfIdWaiting() const
+{
+  return m_dtmf_id_state == ID_WAITING;
+} /* Logic::isDtmfIdWaiting */
 
 
 /*

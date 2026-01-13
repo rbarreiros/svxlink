@@ -45,6 +45,8 @@ FX_GAIN_LOW=-12
 #DTMF_CTRL_PTY=/dev/shm/simplex_dtmf_ctrl
 #CTCSS_TO_TG=77.0:999,123.0:9990,146.2:9992
 CTCSS_TO_TG_DELAY=1000
+#DTMF_ID_ENABLE=0
+#DTMF_ID_USERS=DtmfUsers
 
 [RepeaterLogic]
 TYPE=Repeater
@@ -90,6 +92,8 @@ IDLE_SOUND_INTERVAL=3000
 #DTMF_IGNORE_WHEN_NOT_UP=1
 #CTCSS_TO_TG=77.0:999,123.0:9990,146.2:9992
 #CTCSS_TO_TG_DELAY=0
+#DTMF_ID_ENABLE=0
+#DTMF_ID_USERS=DtmfUsers
 
 [ReflectorLogic]
 TYPE=Reflector
@@ -379,3 +383,9 @@ APRS_SERVER_LIST=rotate.aprs2.net:14580
 #COMMENT=SvxLink Node
 #PTY_PATH=/dev/shm/aprs_pty
 #DEBUG=0
+
+# Example DTMF user configuration section
+#[DtmfUsers]
+#N0CALL=123456
+#N1CALL=987654
+#N2CALL=555123
