@@ -63,6 +63,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 #include "ProtoVer.h"
 #include "ReflectorClient.h"
+#include "RemoteUserAuth.h"
 
 
 /****************************************************************************
@@ -235,6 +236,9 @@ class Reflector : public sigc::trackable
 
     Json::Value& clientStatus(const std::string& callsign);
 
+    bool remoteAuthEnabled(void) const { return m_remote_auth_enable; }
+    RemoteUserAuth* remoteUserAuth(void) const { return m_remote_user_auth; }
+
   protected:
 
   private:
@@ -278,6 +282,8 @@ class Reflector : public sigc::trackable
     std::vector<uint8_t>        m_ca_sig;
     std::string                 m_accept_cert_email;
     Json::Value                 m_status;
+    bool                        m_remote_auth_enable;
+    RemoteUserAuth*             m_remote_user_auth;
 
     Reflector(const Reflector&);
     Reflector& operator=(const Reflector&);

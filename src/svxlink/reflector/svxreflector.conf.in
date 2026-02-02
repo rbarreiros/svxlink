@@ -4,6 +4,13 @@
 #
 ###################################################################
 
+
+[REMOTE_USER_AUTH]
+USER_AUTH_ENABLE=0
+USER_AUTH_URL=http://localhost:8000/api/v1/auth/user
+USER_AUTH_TOKEN=your_secret_token_here
+USER_AUTH_FORCE_VALID_SSL=0
+
 [GLOBAL]
 #CFG_DIR=svxreflector.d
 TIMESTAMP_FORMAT="%c"

@@ -67,6 +67,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "Reflector.h"
 #include "ReflectorClient.h"
 #include "TGHandler.h"
+#include "RemoteUserAuth.h"
 
 
 /****************************************************************************
@@ -232,7 +233,8 @@ Reflector::Reflector(void)
   : m_srv(0), m_udp_sock(0), m_tg_for_v1_clients(1), m_random_qsy_lo(0),
     m_random_qsy_hi(0), m_random_qsy_tg(0), m_http_server(0), m_cmd_pty(0),
     m_keys_dir("private/"), m_pending_csrs_dir("pending_csrs/"),
-    m_csrs_dir("csrs/"), m_certs_dir("certs/"), m_pki_dir("pki/")
+    m_csrs_dir("csrs/"), m_certs_dir("certs/"), m_pki_dir("pki/"),
+    m_remote_auth_enable(false), m_remote_user_auth(0)
 {
   TGHandler::instance()->talkerUpdated.connect(
       mem_fun(*this, &Reflector::onTalkerUpdated));
@@ -257,6 +259,14 @@ Reflector::Reflector(void)
         }
       });
   m_status["nodes"] = Json::Value(Json::objectValue);
+
+  // Initialize curl globally for RemoteUserAuth
+  if (!RemoteUserAuth::curlGlobalInit())
+  {
+    std::cerr << "*** WARNING: curl global initialization failed. "
+              << "Remote user authentication will not work." << std::endl;
+  }
+  m_remote_user_auth = new RemoteUserAuth();
 } /* Reflector::Reflector */
 
 
@@ -273,6 +283,9 @@ Reflector::~Reflector(void)
   m_client_con_map.clear();
   ReflectorClient::cleanup();
   delete TGHandler::instance();
+  delete m_remote_user_auth;
+  m_remote_user_auth = 0;
+  RemoteUserAuth::curlGlobalCleanup();
 } /* Reflector::~Reflector */
 
 
@@ -280,6 +293,8 @@ bool Reflector::initialize(Async::Config &cfg)
 {
   m_cfg = &cfg;
   TGHandler::instance()->setConfig(m_cfg);
+
+  m_remote_auth_enable = cfg.getValue("REMOTE_USER_AUTH", "USER_AUTH_ENABLE", 0);
 
   std::string listen_port("5300");
   cfg.getValue("GLOBAL", "LISTEN_PORT", listen_port);
