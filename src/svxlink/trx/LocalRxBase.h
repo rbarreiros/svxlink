@@ -79,6 +79,7 @@ namespace Async
 
 class Squelch;
 class HdlcDeframer;
+class SubAudioFskDecoder;
 
 
 /****************************************************************************
@@ -223,6 +224,18 @@ class LocalRxBase : public Rx
      */
     sigc::signal<void(float, float)> ctcssSnrUpdated;
 
+    /**
+     * @brief  A signal that is emitted when a subaudible FSK ID frame has
+     *         been decoded
+     * @param  id    The decoded 24-bit unit ID (0 if invalid or not found)
+     * @param  valid \em true if the CRC check passed
+     *
+     * This signal is emitted at most once per PTT event, as soon as a
+     * complete FSK identification frame has been received and processed.
+     * It is only emitted when FSK_ID_ENABLE is set to 1 in the config.
+     */
+    sigc::signal<void(uint32_t, bool)> fskIdDecoded;
+
   protected:
     /**
      * @brief   Open the audio input source
@@ -281,6 +294,7 @@ class LocalRxBase : public Rx
     HdlcDeframer *              ib_afsk_deframer;
     bool                        audio_dev_keep_open;
     Async::AudioSplitter *      fullband_splitter;
+    SubAudioFskDecoder *        m_fsk_id_decoder;
 
     int audioRead(float *samples, int count);
     void dtmfDigitActivated(char digit);
@@ -297,6 +311,7 @@ class LocalRxBase : public Rx
     void rxReadyStateChanged(void);
     void publishSquelchState(void);
     void cfgUpdated(const std::string& section, const std::string& tag);
+    void onFskDecoderSquelchOpen(bool is_open);
 
 };  /* class LocalRxBase */
 

@@ -85,6 +85,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "Tx.h"
 #include "Emphasis.h"
 #include "LADSPAPluginLoader.h"
+#include "SubAudioFskDecoder.h"
 
 
 /****************************************************************************
@@ -238,7 +239,8 @@ LocalRxBase::LocalRxBase(Config &cfg, const std::string& name)
     tone_dets(0), sql_valve(0), delay(0), sql_tail_elim(0),
     preamp_gain(0), mute_valve(0), sql_hangtime(0), sql_extended_hangtime(0),
     sql_extended_hangtime_thresh(0), input_fifo(0), dtmf_muting_pre(0),
-    ob_afsk_deframer(0), ib_afsk_deframer(0), audio_dev_keep_open(false)
+    ob_afsk_deframer(0), ib_afsk_deframer(0), audio_dev_keep_open(false),
+    m_fsk_id_decoder(nullptr)
 {
 } /* LocalRxBase::LocalRxBase */
 
@@ -252,6 +254,8 @@ LocalRxBase::~LocalRxBase(void)
   ob_afsk_deframer = 0;
   delete ib_afsk_deframer;
   ib_afsk_deframer = 0;
+  delete m_fsk_id_decoder;
+  m_fsk_id_decoder = nullptr;
 } /* LocalRxBase::~LocalRxBase */
 
 
@@ -441,6 +445,26 @@ bool LocalRxBase::initialize(void)
   squelch_det->squelchOpen.connect(mem_fun(*this, &LocalRxBase::onSquelchOpen));
   squelch_det->toneDetected.connect(mem_fun(*this, &LocalRxBase::onToneDetected));
   fullband_splitter->addSink(squelch_det, true);
+
+    // Set up optional subaudible FSK ID decoder if configured
+  bool fsk_id_enable = false;
+  cfg().getValue(name(), "FSK_ID_ENABLE", fsk_id_enable);
+  if (fsk_id_enable)
+  {
+    m_fsk_id_decoder = new SubAudioFskDecoder(cfg(), name());
+    if (!m_fsk_id_decoder->initialize())
+    {
+      cerr << "*** ERROR: FSK ID decoder initialization failed for RX \""
+           << name() << "\"" << endl;
+      delete m_fsk_id_decoder;
+      m_fsk_id_decoder = nullptr;
+      return false;
+    }
+    m_fsk_id_decoder->idDecoded.connect(fskIdDecoded.make_slot());
+    fullband_splitter->addSink(m_fsk_id_decoder, true);
+    squelch_det->squelchOpen.connect(
+        mem_fun(*this, &LocalRxBase::onFskDecoderSquelchOpen));
+  }
 
   squelchOpen.connect(
       sigc::hide(sigc::mem_fun(*this, &LocalRxBase::publishSquelchState)));
@@ -1030,6 +1054,15 @@ void LocalRxBase::cfgUpdated(const std::string& section, const std::string& tag)
     }
   }
 } /* LocalRxBase::cfgUpdated */
+
+
+void LocalRxBase::onFskDecoderSquelchOpen(bool is_open)
+{
+  if (m_fsk_id_decoder != nullptr)
+  {
+    m_fsk_id_decoder->activate(is_open);
+  }
+} /* LocalRxBase::onFskDecoderSquelchOpen */
 
 
 /*

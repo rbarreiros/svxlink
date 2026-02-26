@@ -285,6 +285,18 @@ DTMF_SERIAL=/dev/ttyS0
 #OB_AFSK_VOICE_GAIN=6
 #IB_AFSK_ENABLE=0
 #LADSPA_PLUGINS=hpf:1000,@Rx1_Compressor
+#
+# Subaudible FSK user identification decoder (optional)
+# F0 (space, bit=0) and F1 (mark, bit=1) default to the 6-46 Hz window
+# above the highest CTCSS tone (254.1 Hz) and below the voice band (300 Hz).
+# Adjust if your CTCSS tone is close to 254.1 Hz.
+#FSK_ID_ENABLE=0
+#FSK_ID_F0=260.0
+#FSK_ID_F1=276.0
+#FSK_ID_BAUD=100
+#FSK_ID_MIN_ENERGY=0.001
+#FSK_ID_OPEN_WITHOUT_ID=1
+#FSK_ID_DEBUG=0
 
 #[Rx1_Compressor]
 #LABEL=tap_dynamics_m
