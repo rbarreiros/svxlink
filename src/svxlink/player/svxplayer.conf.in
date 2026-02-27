@@ -1,0 +1,162 @@
+###############################################################################
+#
+# SvxPlayer configuration file
+#
+# SvxPlayer connects to an SvxReflector and plays audio files to a talk group
+# either on a schedule or on demand through a PTY interface.
+#
+###############################################################################
+
+[GLOBAL]
+# Optionally point to a directory from which additional .conf files are loaded
+#CFG_DIR=@SVX_SYSCONF_INSTALL_DIR@/svxplayer.d
+TIMESTAMP_FORMAT="%Y-%m-%d %H:%M:%S"
+
+
+###############################################################################
+#
+# Main SvxPlayer section
+#
+###############################################################################
+
+[SvxPlayer]
+
+##############################################################################
+# Connection settings (same as ReflectorLogic)
+##############################################################################
+
+# Your station callsign (required)
+CALLSIGN=MYCALL
+
+# Shared secret for HMAC-SHA1 authentication (required)
+#AUTH_KEY="Change this key now!"
+
+# Comma-separated list of reflector hostnames (and optional :port).
+# Example: HOSTS=reflector.example.org,reflector2.example.org:5301
+HOSTS=reflector.example.org
+
+# TCP/UDP port of the reflector (default: 5300)
+#HOST_PORT=5300
+
+# SRV DNS domain for automatic reflector discovery (alternative to HOSTS)
+#DNS_DOMAIN=example.com
+
+# Priority, weight and increment for multiple HOSTS entries
+#HOST_PRIO=100
+#HOST_PRIO_INC=1
+#HOST_WEIGHT=10
+
+# Jitter buffer delay in milliseconds (0 to disable)
+#JITTER_BUFFER_DELAY=0
+
+# UDP heartbeat interval in seconds (default: 15)
+#UDP_HEARTBEAT_INTERVAL=15
+
+# Enable verbose node join/leave messages (0 or 1)
+#VERBOSE=1
+
+##############################################################################
+# Certificate / PKI settings (same as ReflectorLogic)
+##############################################################################
+
+# Directory where PKI files (key, csr, crt, CA bundle) are stored
+#CERT_PKI_DIR=@SVX_LOCAL_STATE_DIR@/pki
+
+# Private key file (default: CERT_PKI_DIR/CALLSIGN.key)
+#CERT_KEYFILE=@SVX_LOCAL_STATE_DIR@/pki/MYCALL.key
+
+# Certificate signing request file (default: CERT_PKI_DIR/CALLSIGN.csr)
+#CERT_CSRFILE=@SVX_LOCAL_STATE_DIR@/pki/MYCALL.csr
+
+# Client certificate file (default: CERT_PKI_DIR/CALLSIGN.crt)
+#CERT_CRTFILE=@SVX_LOCAL_STATE_DIR@/pki/MYCALL.crt
+
+# CA bundle file (default: CERT_PKI_DIR/ca-bundle.crt)
+#CERT_CAFILE=@SVX_LOCAL_STATE_DIR@/pki/ca-bundle.crt
+
+# Download CA bundle from server if missing or outdated (0 or 1, default: 1)
+#CERT_DOWNLOAD_CA_BUNDLE=1
+
+# Subject name fields for the certificate signing request
+#CERT_SUBJ_givenName=John
+#CERT_SUBJ_surname=Doe
+#CERT_SUBJ_organizationalUnitName=SvxLink
+#CERT_SUBJ_organizationName=SSA
+#CERT_SUBJ_localityName=Stockholm
+#CERT_SUBJ_stateOrProvinceName=Sodermanland
+#CERT_SUBJ_countryName=SE
+#CERT_EMAIL=mycall@example.com
+
+##############################################################################
+# Player settings
+##############################################################################
+
+# Default talk group to use when none is specified for a scheduled entry
+# or PTY play command (0 = no default TG, must always be specified explicitly)
+DEFAULT_TG=999
+
+# Audio codec to use between svxplayer and the reflector.
+# Available: OPUS (default), SPEEX, GSM, S16, RAW
+# The reflector must support the chosen codec; OPUS is recommended.
+#CODEC=OPUS
+
+# Path of the PTY symlink for on-demand command input.
+# Send commands to this file to trigger playback:
+#   PLAY <file>         - Play file on DEFAULT_TG
+#   PLAY <tg> <file>    - Play file on talk group <tg>
+#   STOP                - Abort current playback and clear queue
+#PTY=@SVX_LOCAL_STATE_DIR@/svxplayer
+
+# Comma-separated list of schedule section names to load
+#SCHEDULES=morning_news,weekly_net,new_year
+
+
+###############################################################################
+#
+# Schedule entry examples
+#
+# Each schedule entry is a separate INI section whose name appears in the
+# SCHEDULES list above.
+#
+# Time fields:
+#   MINUTE  0-59       (* = any, comma list, or N-M range)
+#   HOUR    0-23       (* = any, comma list, or N-M range)
+#   DOM     1-31       day-of-month  (* = any, comma list, or N-M range)
+#   MONTH   1-12       (* = any, comma list, or N-M range)
+#   DOW     0-6        day-of-week (0=Sunday, 6=Saturday)
+#                      (* = any, comma list, or N-M range)
+#   YEAR    4-digit    optional - if set and not *, entry fires only that year
+#                      (one-shot event; entry is ignored once the year passes)
+#
+###############################################################################
+
+# Example: Play morning_news.wav on TG 12345 weekdays at 07:00
+#[morning_news]
+#FILE=@SVX_SHARE_INSTALL_DIR@/sounds/morning_news.wav
+#TG=12345
+#MINUTE=0
+#HOUR=7
+#DOM=*
+#MONTH=*
+#DOW=1-5
+
+# Example: Play net_announcement.wav on TG 240 every Wednesday at 20:30
+#[weekly_net]
+#FILE=@SVX_SHARE_INSTALL_DIR@/sounds/net_announcement.wav
+#TG=240
+#MINUTE=30
+#HOUR=20
+#DOM=*
+#MONTH=*
+#DOW=3
+
+# Example: Play new_year.wav on TG 999 at midnight on 1 Jan 2027 (one-shot)
+#[new_year]
+#FILE=@SVX_SHARE_INSTALL_DIR@/sounds/new_year.wav
+#TG=999
+#MINUTE=0
+#HOUR=0
+#DOM=1
+#MONTH=1
+#DOW=*
+#YEAR=2027
