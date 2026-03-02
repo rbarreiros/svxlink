@@ -226,7 +226,7 @@ class Reflector : public sigc::trackable
      * @brief  Update Qso information
      * @param  ToDo
      */
-    void updateQsostate(Json::Value eventmessage);
+    void updateQsostate(const std::string& client_callsign, Json::Value eventmessage);
 
     Async::EncryptedUdpSocket* udpSocket(void) const { return m_udp_sock; }
 

@@ -1171,7 +1171,7 @@ void ReflectorClient::handleStateEvent(std::istream& is)
   }
   else if (msg.name() == "QsoInfo:state")
   {
-    m_reflector->updateQsostate(eventmessage);
+    m_reflector->updateQsostate(m_callsign, eventmessage);
   }
 } /* ReflectorClient::handleStateEvent */
 

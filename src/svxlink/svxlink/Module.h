@@ -413,7 +413,7 @@ class Module : public sigc::trackable, public Async::AudioSink,
     
     void sendDtmf(const std::string& digits);
 
-    sigc::signal<void, const std::string&, const std::string&> publishStateEvent;
+    sigc::signal<void(const std::string&, const std::string&)> publishStateEvent;
     
   protected:
     /**

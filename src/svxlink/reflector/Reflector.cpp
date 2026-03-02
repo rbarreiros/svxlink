@@ -826,9 +826,28 @@ void Reflector::updateUserdata(Json::Value user_arr)
 } /* Reflector::updateUserdata */
 
 
-void Reflector::updateQsostate(Json::Value eventmessage)
+void Reflector::updateQsostate(const std::string& client_callsign,
+                               Json::Value eventmessage)
 {
-  cout << jsonToString(eventmessage) << endl;
+  std::string user_callsign = eventmessage.get("callsign", "").asString();
+  std::string gw_callsign   = eventmessage.get("gwcallsign", "").asString();
+  std::string mode          = eventmessage.get("mode", "").asString();
+  int tg                    = eventmessage.get("TG", 0).asInt();
+  int gateway               = eventmessage.get("gateway", 0).asInt();
+
+  cout << client_callsign << ": QsoInfo:state"
+       << " -- User=" << user_callsign
+       << " TG=" << tg
+       << " Mode=" << mode;
+  if (gateway > 0)
+  {
+    cout << " GW-DMRID=" << gateway;
+  }
+  if (!gw_callsign.empty())
+  {
+    cout << " GW-Call=" << gw_callsign;
+  }
+  cout << endl;
 } /* Reflector::updateQsostate */
 
 
