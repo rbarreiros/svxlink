@@ -42,6 +42,11 @@ set(RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
 # Add project local CMake module directory
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/Modules/")
 
+# Require C++17 globally: the Paho MQTT C++ library and other components need it
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 # Optional parts
 option(USE_QT "Build Qt applications and libs" ON)
 option(BUILD_STATIC_LIBS "Build static libraries in addition to dynamic" OFF)
