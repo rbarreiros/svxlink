@@ -129,15 +129,45 @@ bool Scheduler::initialize(Async::Config& cfg, const string& section,
     ScheduleEntry entry;
     entry.name = name;
 
-    if (!cfg.getValue(name, "FILE", entry.file) || entry.file.empty())
+    string files_str;
+    if (cfg.getValue(name, "FILES", files_str) && !files_str.empty())
+    {
+      istringstream fss(files_str);
+      string f;
+      while (getline(fss, f, ','))
+      {
+        f.erase(0, f.find_first_not_of(" \t"));
+        f.erase(f.find_last_not_of(" \t") + 1);
+        if (!f.empty())
+        {
+          entry.files.push_back(f);
+        }
+      }
+    }
+    else
+    {
+      string single_file;
+      if (!cfg.getValue(name, "FILE", single_file) || single_file.empty())
+      {
+        cerr << "*** ERROR: Schedule entry '" << name
+             << "' must have FILE or FILES configured" << endl;
+        return false;
+      }
+      entry.files.push_back(single_file);
+    }
+
+    if (entry.files.empty())
     {
       cerr << "*** ERROR: Schedule entry '" << name
-           << "' is missing or has empty FILE" << endl;
+           << "' has no valid files in FILES list" << endl;
       return false;
     }
 
     entry.tg = m_default_tg;
     cfg.getValue(name, "TG", entry.tg);
+
+    entry.gap_s = 0;
+    cfg.getValue(name, "GAP", entry.gap_s);
 
     string field;
 
@@ -211,9 +241,17 @@ bool Scheduler::initialize(Async::Config& cfg, const string& section,
     entry.year = year_val;
 
     m_entries.push_back(entry);
+    string files_log;
+    for (size_t i = 0; i < entry.files.size(); ++i)
+    {
+      if (i > 0) files_log += ", ";
+      files_log += entry.files[i];
+    }
     cout << "SvxPlayer: Loaded schedule entry '" << name
-         << "' -> " << entry.file
-         << " on TG " << entry.tg << endl;
+         << "' -> [" << files_log << "]"
+         << " on TG " << entry.tg
+         << (entry.gap_s > 0 ? " gap=" + to_string(entry.gap_s) + "s" : "")
+         << endl;
   }
 
   if (!m_entries.empty())
@@ -243,14 +281,22 @@ void Scheduler::onTick(Async::Timer*)
   {
     if (entry.matches(t))
     {
+      string files_log;
+      for (size_t i = 0; i < entry.files.size(); ++i)
+      {
+        if (i > 0) files_log += ", ";
+        files_log += entry.files[i];
+      }
       cout << "SvxPlayer: Schedule '" << entry.name
-           << "' fired: " << entry.file
-           << " on TG " << entry.tg << endl;
+           << "' fired: [" << files_log << "]"
+           << " on TG " << entry.tg
+           << (entry.gap_s > 0 ? " gap=" + to_string(entry.gap_s) + "s" : "")
+           << endl;
       if ((entry.year > 0) && ((t.tm_year + 1900) == entry.year))
       {
         entry.fired_year = true;
       }
-      playFile(entry.file, entry.tg);
+      playFiles(entry.files, entry.tg, entry.gap_s * 1000);
     }
   }
 } /* Scheduler::onTick */

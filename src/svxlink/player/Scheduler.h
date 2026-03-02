@@ -76,16 +76,17 @@ Each field stores a set of matching values; an empty set means "wildcard" (*).
 */
 struct ScheduleEntry
 {
-  std::string           name;
-  std::string           file;
-  uint32_t              tg          = 0;
-  std::set<int>         minutes;
-  std::set<int>         hours;
-  std::set<int>         doms;
-  std::set<int>         months;
-  std::set<int>         dows;
-  int                   year        = 0;
-  bool                  fired_year  = false;
+  std::string              name;
+  std::vector<std::string> files;
+  uint32_t                 tg          = 0;
+  uint32_t                 gap_s       = 0;
+  std::set<int>            minutes;
+  std::set<int>            hours;
+  std::set<int>            doms;
+  std::set<int>            months;
+  std::set<int>            dows;
+  int                      year        = 0;
+  bool                     fired_year  = false;
 
   /**
    * @brief  Return true if the entry matches the given broken-down time
@@ -109,10 +110,12 @@ class Scheduler : public sigc::trackable
   public:
     /**
      * @brief  Emitted when a scheduled entry fires
-     * @param  file  Path to the audio file to play
-     * @param  tg    Talk group (0 = use DEFAULT_TG)
+     * @param  files      Ordered list of audio file paths to play
+     * @param  tg         Talk group (0 = use DEFAULT_TG)
+     * @param  gap_ms     Milliseconds of silence (PTT released) between files
      */
-    sigc::signal<void(const std::string&, uint32_t)> playFile;
+    sigc::signal<void(const std::vector<std::string>&, uint32_t, uint32_t)>
+        playFiles;
 
     /**
      * @brief  Constructor

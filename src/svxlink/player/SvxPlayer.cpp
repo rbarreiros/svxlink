@@ -44,6 +44,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <streambuf>
 #include <numeric>
 #include <cassert>
+#include <vector>
 
 
 /****************************************************************************
@@ -108,7 +109,8 @@ namespace {
 SvxPlayer::SvxPlayer(void)
   : m_reconnect_timer(60000, Timer::TYPE_ONESHOT, false),
     m_heartbeat_timer(1000, Timer::TYPE_PERIODIC, false),
-    m_flush_timeout_timer(3000, Timer::TYPE_ONESHOT, false)
+    m_flush_timeout_timer(3000, Timer::TYPE_ONESHOT, false),
+    m_gap_timer(0, Timer::TYPE_ONESHOT, false)
 {
   m_reconnect_timer.expired.connect(
       sigc::hide(sigc::mem_fun(*this, &SvxPlayer::reconnect)));
@@ -116,6 +118,8 @@ SvxPlayer::SvxPlayer(void)
       sigc::mem_fun(*this, &SvxPlayer::handleTimerTick));
   m_flush_timeout_timer.expired.connect(
       sigc::mem_fun(*this, &SvxPlayer::flushTimeout));
+  m_gap_timer.expired.connect(
+      sigc::mem_fun(*this, &SvxPlayer::onGapTimerExpired));
   timerclear(&m_last_talker_timestamp);
 
   m_con.connected.connect(
@@ -209,22 +213,39 @@ bool SvxPlayer::initialize(Async::Config& cfg)
 
 void SvxPlayer::playFile(const string& file, uint32_t tg)
 {
+  playFiles({file}, tg, 0);
+} /* SvxPlayer::playFile */
+
+
+void SvxPlayer::playFiles(const vector<string>& files, uint32_t tg,
+                           uint32_t gap_ms)
+{
+  if (files.empty())
+  {
+    return;
+  }
   if (tg == 0)
   {
     tg = m_default_tg;
   }
-  PlayRequest req{file, tg};
-  m_play_queue.push(req);
-
+  for (size_t i = 0; i < files.size(); ++i)
+  {
+    PlayRequest req;
+    req.file          = files[i];
+    req.tg            = tg;
+    req.gap_before_ms = (i == 0) ? 0 : gap_ms;
+    m_play_queue.push(req);
+  }
   if (isLoggedIn() && !m_playing)
   {
     startNextPlayback();
   }
-} /* SvxPlayer::playFile */
+} /* SvxPlayer::playFiles */
 
 
 void SvxPlayer::stop(void)
 {
+  m_gap_timer.setEnable(false);
   while (!m_play_queue.empty())
   {
     m_play_queue.pop();
@@ -471,8 +492,8 @@ bool SvxPlayer::setupPki(void)
 
 bool SvxPlayer::setupScheduler(void)
 {
-  m_scheduler.playFile.connect(
-      sigc::mem_fun(*this, &SvxPlayer::playFile));
+  m_scheduler.playFiles.connect(
+      sigc::mem_fun(*this, &SvxPlayer::playFiles));
   return m_scheduler.initialize(*m_cfg, m_name, m_default_tg);
 } /* SvxPlayer::setupScheduler */
 
@@ -532,6 +553,7 @@ void SvxPlayer::onDisconnected(TcpConnection*,
        << TcpConnection::disconnectReasonStr(reason) << endl;
 
   m_flush_timeout_timer.setEnable(false);
+  m_gap_timer.setEnable(false);
   m_msg_handler->clear();
   while (!m_play_queue.empty())
   {
@@ -1640,9 +1662,28 @@ void SvxPlayer::allMsgsWritten(void)
 
   if (!m_play_queue.empty())
   {
-    startNextPlayback();
+    uint32_t gap = m_play_queue.front().gap_before_ms;
+    if (gap > 0)
+    {
+      cout << m_name << ": Waiting " << gap << " ms before next file" << endl;
+      m_playing = true;
+      m_gap_timer.setTimeout(static_cast<int>(gap));
+      m_gap_timer.setEnable(true);
+    }
+    else
+    {
+      startNextPlayback();
+    }
   }
 } /* SvxPlayer::allMsgsWritten */
+
+
+void SvxPlayer::onGapTimerExpired(Async::Timer*)
+{
+  m_gap_timer.setEnable(false);
+  m_playing = false;
+  startNextPlayback();
+} /* SvxPlayer::onGapTimerExpired */
 
 
 bool SvxPlayer::loadClientCertificate(void)
@@ -1701,30 +1742,59 @@ void SvxPlayer::processCommand(const string& line)
 
   if (cmd == "PLAY")
   {
-    string token1, token2;
+    string token1, token2, token3;
     if (!(iss >> token1))
     {
       cerr << m_name << ": PLAY command missing arguments" << endl;
       return;
     }
 
-    if (iss >> token2)
+    bool has2 = (bool)(iss >> token2);
+    bool has3 = (bool)(iss >> token3);
+
+    auto splitCSV = [](const string& s) {
+      vector<string> out;
+      istringstream ss(s);
+      string f;
+      while (getline(ss, f, ','))
+      {
+        if (!f.empty()) out.push_back(f);
+      }
+      return out;
+    };
+
+    if (!has2)
+    {
+      playFiles(splitCSV(token1), 0, 0);
+    }
+    else if (!has3)
     {
       uint32_t tg = 0;
-      try
-      {
-        tg = static_cast<uint32_t>(stoul(token1));
-      }
+      try { tg = static_cast<uint32_t>(stoul(token1)); }
       catch (const exception&)
       {
         cerr << m_name << ": Invalid TG in PLAY command: " << token1 << endl;
         return;
       }
-      playFile(token2, tg);
+      playFiles(splitCSV(token2), tg, 0);
     }
     else
     {
-      playFile(token1, 0);
+      uint32_t tg = 0;
+      try { tg = static_cast<uint32_t>(stoul(token1)); }
+      catch (const exception&)
+      {
+        cerr << m_name << ": Invalid TG in PLAY command: " << token1 << endl;
+        return;
+      }
+      uint32_t gap_s = 0;
+      try { gap_s = static_cast<uint32_t>(stoul(token2)); }
+      catch (const exception&)
+      {
+        cerr << m_name << ": Invalid GAP in PLAY command: " << token2 << endl;
+        return;
+      }
+      playFiles(splitCSV(token3), tg, gap_s * 1000);
     }
     return;
   }

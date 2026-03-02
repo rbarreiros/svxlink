@@ -131,6 +131,16 @@ class SvxPlayer : public sigc::trackable
     void playFile(const std::string& file, uint32_t tg = 0);
 
     /**
+     * @brief  Queue multiple files for sequential playback on the given talk group
+     * @param  files   Ordered list of audio file paths
+     * @param  tg      Talk group (0 = use DEFAULT_TG)
+     * @param  gap_ms  Milliseconds of silence (PTT released) inserted between
+     *                 consecutive files; 0 means back-to-back playback
+     */
+    void playFiles(const std::vector<std::string>& files,
+                   uint32_t tg = 0, uint32_t gap_ms = 0);
+
+    /**
      * @brief  Abort current playback and clear the playback queue
      */
     void stop(void);
@@ -140,6 +150,7 @@ class SvxPlayer : public sigc::trackable
     {
       std::string file;
       uint32_t    tg;
+      uint32_t    gap_before_ms = 0;
     };
 
     typedef enum
@@ -199,6 +210,7 @@ class SvxPlayer : public sigc::trackable
 
     std::queue<PlayRequest>           m_play_queue;
     bool                              m_playing            = false;
+    Async::Timer                      m_gap_timer;
 
     Async::Pty*                       m_pty                = nullptr;
     std::string                       m_pty_path;
@@ -276,6 +288,7 @@ class SvxPlayer : public sigc::trackable
 
     void selectTg(uint32_t tg);
     void startNextPlayback(void);
+    void onGapTimerExpired(Async::Timer*);
 
     bool loadClientCertificate(void);
 

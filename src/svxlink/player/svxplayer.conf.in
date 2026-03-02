@@ -102,9 +102,12 @@ DEFAULT_TG=999
 
 # Path of the PTY symlink for on-demand command input.
 # Send commands to this file to trigger playback:
-#   PLAY <file>         - Play file on DEFAULT_TG
-#   PLAY <tg> <file>    - Play file on talk group <tg>
-#   STOP                - Abort current playback and clear queue
+#   PLAY <file>                           - Play file on DEFAULT_TG
+#   PLAY <tg> <file>                      - Play file on talk group <tg>
+#   PLAY <tg> <file1>,<file2>,...         - Play multiple files back-to-back on <tg>
+#   PLAY <tg> <gap_s> <file1>,<file2>,... - Play multiple files with <gap_s> seconds
+#                                           of silence (PTT released) between each
+#   STOP                                  - Abort current playback and clear queue
 #PTY=@SVX_LOCAL_STATE_DIR@/svxplayer
 
 # Comma-separated list of schedule section names to load
@@ -117,6 +120,14 @@ DEFAULT_TG=999
 #
 # Each schedule entry is a separate INI section whose name appears in the
 # SCHEDULES list above.
+#
+# Audio file options (use one):
+#   FILE=<path>                  - single audio file (WAV, 16 kHz mono 16-bit)
+#   FILES=<path1>,<path2>,...    - ordered list of files played sequentially
+#
+# Optional gap between files:
+#   GAP=<seconds>                - seconds of silence (PTT released) between
+#                                  consecutive files in a FILES= list; default 0
 #
 # Time fields:
 #   MINUTE  0-59       (* = any, comma list, or N-M range)
@@ -133,6 +144,18 @@ DEFAULT_TG=999
 # Example: Play morning_news.wav on TG 12345 weekdays at 07:00
 #[morning_news]
 #FILE=@SVX_SHARE_INSTALL_DIR@/sounds/morning_news.wav
+#TG=12345
+#MINUTE=0
+#HOUR=7
+#DOM=*
+#MONTH=*
+#DOW=1-5
+
+# Example: Play three news segments on TG 12345 weekdays at 07:00,
+#          with 5 seconds of silence (PTT released) between each segment
+#[morning_news_multi]
+#FILES=@SVX_SHARE_INSTALL_DIR@/sounds/news_intro.wav,@SVX_SHARE_INSTALL_DIR@/sounds/news_body.wav,@SVX_SHARE_INSTALL_DIR@/sounds/news_outro.wav
+#GAP=5
 #TG=12345
 #MINUTE=0
 #HOUR=7
