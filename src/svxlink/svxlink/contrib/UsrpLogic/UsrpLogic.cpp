@@ -642,6 +642,8 @@ void UsrpLogic::udpDatagramReceived(const IpAddress& addr, uint16_t port,
         log(LOGERROR, ss.str());
         return;
       }
+      cout << "usrpmeta tlvmsg: " << usrptlvmsg.getCallsign() << " " << usrptlvmsg.getTg() << " " << usrptlvmsg.getDmrId() << endl;
+
       m_last_call = usrptlvmsg.getCallsign();
       m_last_tg = usrptlvmsg.getTg();
       m_last_dmrid = usrptlvmsg.getDmrId();
@@ -671,6 +673,8 @@ void UsrpLogic::udpDatagramReceived(const IpAddress& addr, uint16_t port,
                [](char c){return !(c>=32 && c <128);}), infomessage.end()); 
         handleSettingsMsg(infomessage);
         userinfo["mode"] = infomessage;
+
+        cout << "usrpmeta infomessage: " << infomessage << endl;
       }
       else if ((found = metadata.find("INFO:{")) != string::npos)
       {
@@ -713,6 +717,8 @@ void UsrpLogic::udpDatagramReceived(const IpAddress& addr, uint16_t port,
           userinfo["tg"] = m_last_tg;
           userinfo["mode"] = m_last_mode;
           userinfo["gateway"] = m_last_dmrid;
+
+          cout << "usrpmeta userinfo: " << userinfo << endl;
         }
       }
       else if ((found = metadata.find("INFO:")) != string::npos)
@@ -721,6 +727,8 @@ void UsrpLogic::udpDatagramReceived(const IpAddress& addr, uint16_t port,
         return;
       }
       event.append(userinfo);
+
+      cout << "usrpmeta dvusers:info " << metadata << endl;
       publishInfo("DvUsers:info", event);
     }
 
@@ -730,6 +738,9 @@ void UsrpLogic::udpDatagramReceived(const IpAddress& addr, uint16_t port,
       ss << "usrp_stationdata_received " << m_last_call << " "
          << m_last_tg << " " << m_last_dmrid;
       processEvent(ss.str());
+
+      cout << "usrp_stationdata_received " << m_last_call << " "
+           << m_last_tg << " " << m_last_dmrid << endl;
     }
   }
   else

@@ -1146,11 +1146,12 @@ void ReflectorClient::handleStateEvent(std::istream& is)
     sendError("Illegal MsgStateEvent protocol message received");
     return;
   }
-  //cout << "### ReflectorClient::handleStateEvent:"
-   //    << " src=" << msg.src()
-   //    << " name=" << msg.name()
-   //    << " msg=" << msg.msg()
- //      << std::endl;
+  
+  cout << "### ReflectorClient::handleStateEvent:"
+       << " src=" << msg.src()
+       << " name=" << msg.name()
+       << " msg=" << msg.msg()
+       << std::endl;
   
   Json::Value eventmessage;
   Json::CharReaderBuilder rbuilder;
