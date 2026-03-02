@@ -71,9 +71,29 @@ CERT_CA_HOOK=@SVX_SHARE_INSTALL_DIR@/ca-hook.py
 #MyNodes="Change this key now!"
 #SM3XYZ="A strong password"
 
+[REMOTE_USER_AUTH]
+USER_AUTH_ENABLE=0
+USER_AUTH_URL=http://localhost:8000/api/v1/auth/user
+USER_AUTH_TOKEN=your_secret_token_here
+USER_AUTH_FORCE_VALID_SSL=0
+
+[MQTT]
+MQTT_ENABLED=0
+MQTT_HOST=localhost
+MQTT_PORT=1883
+MQTT_USERNAME=svxreflector
+MQTT_PASSWORD=your_password
+MQTT_TOPIC_PREFIX=reflector
+MQTT_SSL_ENABLED=0
+#MQTT_CA_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+#MQTT_CLIENT_CERT_FILE=/path/to/client.crt
+#MQTT_CLIENT_KEY_FILE=/path/to/client.key
+#MQTT_SSL_VERIFY_HOSTNAME=1
+
 #[TG#9999]
 #AUTO_QSY_AFTER=300
 #ALLOW=S[A-M]\\\\d.*|LA8PV
 #ALLOW_MONITOR=S[A-M]3.*
 #SHOW_ACTIVITY=0
+
 

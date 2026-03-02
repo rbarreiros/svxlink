@@ -363,6 +363,12 @@ class ReflectorClient : public sigc::trackable
     const std::string& callsign(void) const { return m_callsign; }
 
     /**
+     * @brief   Get the login time for this connection
+     * @return  Returns the time when the client was successfully authenticated
+     */
+    time_t loginTime(void) const { return m_login_time; }
+
+    /**
      * @brief   Return the next UDP packet transmit sequence number
      * @return  Returns the UDP packet sequence number that should be used next
      *
@@ -528,6 +534,7 @@ class ReflectorClient : public sigc::trackable
     ConState                    m_con_state;
     Async::Timer                m_disc_timer;
     std::string                 m_callsign;
+    time_t                      m_login_time;
     ClientId                    m_client_id;
     ClientSrc                   m_client_src;
     uint16_t                    m_remote_udp_port;
@@ -582,6 +589,8 @@ class ReflectorClient : public sigc::trackable
     bool sendClientCert(const Async::SslX509& cert);
     void sendAuthChallenge(void);
     void renewClientCertificate(void);
+    void onRemoteAuthDone(bool success, const std::string& message,
+                          const MsgAuthResponse& msg, const std::string& auth_key);
     void setMonitoredTGs(const std::set<uint32_t>& tgs);
     void setTg(uint32_t tg);
 
