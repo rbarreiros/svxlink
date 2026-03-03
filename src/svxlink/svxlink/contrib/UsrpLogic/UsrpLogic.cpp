@@ -739,8 +739,24 @@ void UsrpLogic::udpDatagramReceived(const IpAddress& addr, uint16_t port,
          << m_last_tg << " " << m_last_dmrid;
       processEvent(ss.str());
 
-      cout << "usrp_stationdata_received " << m_last_call << " "
-           << m_last_tg << " " << m_last_dmrid << endl;
+      cout << "usrp_stationdata_received " << m_last_call << "|"
+           << m_last_tg << "|" << m_last_dmrid << endl;
+
+
+           Json::Value qso_info(Json::objectValue);
+           qso_info["callsign"] = m_last_call;
+           qso_info["TG"] = m_last_tg;
+           qso_info["DMR-ID"] = m_last_dmrid;
+     
+           Json::StreamWriterBuilder builder;
+           builder["commentStyle"] = "None";
+           builder["indentation"] = "";
+           std::unique_ptr<Json::StreamWriter> writer(builder.newStreamWriter());
+           std::stringstream qso_os;
+           writer->write(qso_info, &qso_os);
+           cout << "usrp_stationdata_received qso_info: " << qso_os.str() << endl;
+           publishStateEvent("QsoInfo:state", qso_os.str());
+     
     }
   }
   else
@@ -1107,8 +1123,8 @@ void UsrpLogic::handlePlayDtmf(const std::string& digit, int amp,
 // receive interlogic messages here
 void UsrpLogic::onPublishStateEvent(const string &event_name, const string &msg)
 {
-  //cout << "UsrpLogic::onPublishStateEvent - event_name: " << event_name
-  //      << ", message: " << msg << endl;
+  cout << "UsrpLogic::onPublishStateEvent - event_name: " << event_name
+        << ", message: " << msg << endl;
 
   // if it is not allowed to handle information about users then all userinfo
   // traffic will be ignored
@@ -1197,6 +1213,8 @@ void UsrpLogic::publishInfo(std::string type, Json::Value event)
 {
   // if it is not allowed to handle information about users then all userinfo
   // traffic will be ignored
+  cout << "UsrpLogic::publishInfo - type: " << type
+        << ", event: " << event.toStyledString() << endl;
   if (!share_userinfo) return;
 
    // sending own Dv user information to the reflectorlogic network

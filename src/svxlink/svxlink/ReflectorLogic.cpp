@@ -951,7 +951,7 @@ void ReflectorLogic::remoteReceivedPublishStateEvent(
     std::istringstream is(data);
     Json::Value user_info;
     is >> user_info;
-    user_info["TG"] = m_selected_tg;
+    user_info["SELECTED_TG"] = m_selected_tg;
     string ud =jsonToString(user_info);
     
     cout << "send qsinfo:state : " << event_name << "," << ud << endl;
@@ -960,7 +960,7 @@ void ReflectorLogic::remoteReceivedPublishStateEvent(
   }
   else if (event_name == "Sds:info" || event_name == "DvUsers:info")
   {
-    cout << "send sds:info or dvusers:info: " << event_name << "," << data << endl;
+    //cout << "send sds:info or dvusers:info: " << event_name << "," << data << endl;
     MsgStateEvent msg(logic->name(), event_name, data);
     sendMsg(msg);
   }
