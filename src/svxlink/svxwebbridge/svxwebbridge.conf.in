@@ -1,0 +1,61 @@
+#
+# svxwebbridge.conf - Configuration for the SvxWebBridge application
+#
+# This file configures a bridge between an SvxReflector and WebSocket
+# browser clients.  Copy to /etc/svxlink/svxwebbridge.conf and edit.
+#
+# Run: svxwebbridge --config /etc/svxlink/svxwebbridge.conf
+#
+
+[SVXWEBBRIDGE]
+
+###############################################################################
+# Reflector connection settings (shared with ReflectorLogic)
+###############################################################################
+
+# Callsign used to authenticate this bridge to the reflector.
+# The callsign also appears in the node list seen by other users.
+CALLSIGN=N0WEB
+
+# One or more reflector host[:port] entries (space separated).
+HOSTS=reflector.example.com
+
+# Default port when not specified per host (default 5300)
+#HOST_PORT=5300
+
+# SRV DNS domain (alternative to HOSTS)
+#DNS_DOMAIN=svxreflector.example.com
+
+# Auth key for legacy HMAC authentication (pre-TLS protocol).
+# Usually not needed when using certificate-based authentication.
+#AUTH_KEY=
+
+# Directory where PKI files (keys, certificates) are stored.
+# Will be created automatically if it does not exist.
+#CERT_PKI_DIR=@SVX_LOCAL_STATE_DIR@/pki/svxwebbridge
+
+# E-mail address(es) added to the client certificate SAN field.
+#CERT_EMAIL=admin@example.com
+
+# Log node join/leave events to stdout (default true).
+#VERBOSE=1
+
+# UDP heartbeat interval in seconds (default 15)
+#UDP_HEARTBEAT_INTERVAL=15
+
+###############################################################################
+# Talk group monitoring
+###############################################################################
+
+# Space/comma separated list of TG IDs to monitor at startup.
+# Browser clients can subscribe to any TG in this list.
+# Example: MONITOR_TGS=9 240 91
+MONITOR_TGS=9
+
+###############################################################################
+# WebSocket server settings
+###############################################################################
+
+# TCP port the WebSocket server listens on.
+# Browsers connect to ws://hostname:WS_PORT/
+WS_PORT=8080
