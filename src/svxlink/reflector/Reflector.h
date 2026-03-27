@@ -311,7 +311,9 @@ class Reflector : public sigc::trackable
     std::string                 m_mqtt_offline_clients_topic;
     std::string                 m_mqtt_talker_topic;
     std::map<std::string, Json::Value> m_offline_clients;
-    
+    std::string                 m_mqtt_cmd_topic;
+    std::string                 m_mqtt_cmd_reply_topic;
+
     /**
      * @brief Get the unique Reflector ID based on the server certificate's public key
      * @return The unique ID as a hex string
@@ -322,6 +324,7 @@ class Reflector : public sigc::trackable
     void startMqttReconnect(void);
     void publishOnlineClients();
     void publishOfflineClients();
+    void mqttCommandReceived(mqtt::const_message_ptr msg);
 #endif
 
     Reflector(const Reflector&);

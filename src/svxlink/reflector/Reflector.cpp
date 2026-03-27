@@ -491,12 +491,16 @@ bool Reflector::initialize(Async::Config &cfg)
         m_mqtt_online_clients_topic = mqtt_topic_prefix + "/" + reflector_id + "/connections/online";
         m_mqtt_offline_clients_topic = mqtt_topic_prefix + "/" + reflector_id + "/connections/offline";
         m_mqtt_talker_topic = mqtt_topic_prefix + "/" + reflector_id + "/talker";
+        m_mqtt_cmd_topic = mqtt_topic_prefix + "/" + reflector_id + "/commands";
+        m_mqtt_cmd_reply_topic = mqtt_topic_prefix + "/" + reflector_id + "/commands/reply";
     } else 
     {
         m_mqtt_status_topic = mqtt_topic_prefix + "/status";
         m_mqtt_online_clients_topic = mqtt_topic_prefix + "/connections/online";
         m_mqtt_offline_clients_topic = mqtt_topic_prefix + "/connections/offline";
         m_mqtt_talker_topic = mqtt_topic_prefix + "/talker";
+        m_mqtt_cmd_topic = mqtt_topic_prefix + "/commands";
+        m_mqtt_cmd_reply_topic = mqtt_topic_prefix + "/commands/reply";
         std::cerr << "MQTT: Warning: Could not generate unique Reflector ID from certificate. Using default status topic." << std::endl;
     }
     
@@ -559,7 +563,15 @@ bool Reflector::initialize(Async::Config &cfg)
          {
              m_mqtt_client->publish(m_mqtt_offline_clients_topic, "[]", 1, true);
          }
+         if (!m_mqtt_cmd_topic.empty())
+         {
+             m_mqtt_client->subscribe(m_mqtt_cmd_topic, 1);
+             cout << "MQTT: Subscribed to command topic: " << m_mqtt_cmd_topic << endl;
+         }
     });
+
+    m_mqtt_client->messageReceived.connect(
+        mem_fun(*this, &Reflector::mqttCommandReceived));
     
     // Timer is already configured as one-shot in constructor
 
@@ -2039,6 +2051,304 @@ void Reflector::ctrlPtyDataReceived(const void *buf, size_t count)
     }
     m_cmd_pty->write("OK\n");
 } /* Reflector::ctrlPtyDataReceived */
+
+
+#ifdef HAVE_MQTT
+void Reflector::mqttCommandReceived(mqtt::const_message_ptr msg)
+{
+  if (!msg || msg->get_topic() != m_mqtt_cmd_topic)
+  {
+    return;
+  }
+
+  const std::string payload = msg->to_string();
+  Json::Value reply(Json::objectValue);
+  reply["status"] = "ok";
+
+  std::string cmd;
+  Json::Value params(Json::objectValue);
+
+    // Try JSON input first; fall back to plain text tokenisation
+  {
+    Json::CharReaderBuilder builder;
+    std::string parse_errors;
+    std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
+    if (reader->parse(payload.c_str(), payload.c_str() + payload.size(),
+                      &params, &parse_errors) && params.isObject())
+    {
+      cmd = params.get("cmd", "").asString();
+      std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::toupper);
+      params["cmd"] = cmd;
+      if (params.isMember("subcmd"))
+      {
+        std::string sc = params["subcmd"].asString();
+        std::transform(sc.begin(), sc.end(), sc.begin(), ::toupper);
+        params["subcmd"] = sc;
+      }
+    }
+    else
+    {
+      std::istringstream ss(payload);
+      if (!(ss >> cmd))
+      {
+        reply["status"]  = "error";
+        reply["message"] = "Empty or invalid command";
+        goto publish_reply;
+      }
+      std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::toupper);
+      params["cmd"] = cmd;
+
+      if (cmd == "CFG")
+      {
+        std::string section, tag, value;
+        ss >> section >> tag >> value;
+        if (!section.empty()) params["section"] = section;
+        if (!tag.empty())     params["tag"]     = tag;
+        if (!value.empty())   params["value"]   = value;
+      }
+      else if (cmd == "NODE")
+      {
+        std::string subcmd, callsign;
+        unsigned blocktime = 0;
+        if (!(ss >> subcmd >> callsign >> blocktime))
+        {
+          reply["status"]  = "error";
+          reply["message"] = "Usage: NODE BLOCK <callsign> <blocktime seconds>";
+          goto publish_reply;
+        }
+        std::transform(subcmd.begin(), subcmd.end(), subcmd.begin(), ::toupper);
+        params["subcmd"]    = subcmd;
+        params["callsign"]  = callsign;
+        params["blocktime"] = blocktime;
+      }
+      else if (cmd == "CA")
+      {
+        std::string subcmd, callsign;
+        if (!(ss >> subcmd))
+        {
+          reply["status"]  = "error";
+          reply["message"] = "Missing CA subcommand. Usage: CA LS|LSC|LSP|SIGN <callsign>|RM <callsign>";
+          goto publish_reply;
+        }
+        std::transform(subcmd.begin(), subcmd.end(), subcmd.begin(), ::toupper);
+        params["subcmd"] = subcmd;
+        ss >> callsign;
+        if (!callsign.empty()) params["callsign"] = callsign;
+      }
+    }
+  }
+
+  reply["cmd"] = cmd;
+
+  if (cmd == "CFG")
+  {
+    std::string section = params.get("section", "").asString();
+    std::string tag     = params.get("tag",     "").asString();
+    std::string value   = params.get("value",   "").asString();
+
+    if (!value.empty())
+    {
+      m_cfg->setValue(section, tag, value);
+      reply["action"]  = "set";
+      reply["section"] = section;
+      reply["tag"]     = tag;
+      reply["value"]   = value;
+    }
+    else if (!tag.empty())
+    {
+      reply["action"]  = "get";
+      reply["section"] = section;
+      reply["tag"]     = tag;
+      reply["value"]   = m_cfg->getValue(section, tag);
+    }
+    else if (!section.empty())
+    {
+      reply["action"]  = "list_section";
+      reply["section"] = section;
+      Json::Value values(Json::objectValue);
+      for (const auto& t : m_cfg->listSection(section))
+      {
+        values[t] = m_cfg->getValue(section, t);
+      }
+      reply["values"] = values;
+    }
+    else
+    {
+      reply["action"] = "list_all";
+      Json::Value config(Json::objectValue);
+      for (const auto& sec : m_cfg->listSections())
+      {
+        Json::Value sec_vals(Json::objectValue);
+        for (const auto& t : m_cfg->listSection(sec))
+        {
+          sec_vals[t] = m_cfg->getValue(sec, t);
+        }
+        config[sec] = sec_vals;
+      }
+      reply["config"] = config;
+    }
+  }
+  else if (cmd == "NODE")
+  {
+    std::string subcmd = params.get("subcmd", "").asString();
+    reply["subcmd"] = subcmd;
+
+    if (subcmd == "BLOCK")
+    {
+      std::string callsign = params.get("callsign", "").asString();
+      if (callsign.empty())
+      {
+        reply["status"]  = "error";
+        reply["message"] = "Missing callsign. Usage: NODE BLOCK <callsign> <blocktime seconds>";
+        goto publish_reply;
+      }
+      unsigned blocktime = params.get("blocktime", 0).asUInt();
+      auto node = ReflectorClient::lookup(callsign);
+      if (node == nullptr)
+      {
+        reply["status"]  = "error";
+        reply["message"] = "Could not find node: " + callsign;
+        goto publish_reply;
+      }
+      node->setBlock(blocktime);
+      reply["callsign"]  = callsign;
+      reply["blocktime"] = blocktime;
+    }
+    else if (subcmd.empty())
+    {
+      reply["status"]  = "error";
+      reply["message"] = "Missing NODE subcommand. Usage: NODE BLOCK <callsign> <blocktime seconds>";
+    }
+    else
+    {
+      reply["status"]  = "error";
+      reply["message"] = "Unknown NODE subcommand '" + subcmd + "'. Valid: BLOCK";
+    }
+  }
+  else if (cmd == "CA")
+  {
+    std::string subcmd = params.get("subcmd", "").asString();
+    reply["subcmd"] = subcmd;
+
+    if (subcmd == "SIGN")
+    {
+      std::string cn = params.get("callsign", "").asString();
+      if (cn.empty())
+      {
+        reply["status"]  = "error";
+        reply["message"] = "Missing callsign. Usage: CA SIGN <callsign>";
+        goto publish_reply;
+      }
+      auto cert = signClientCsr(cn);
+      if (!cert.isNull())
+      {
+        reply["callsign"]    = cn;
+        reply["certificate"] = cert.toString();
+        std::cout << "---------- Signed Client Certificate ----------\n"
+                  << cert.toString()
+                  << "-----------------------------------------------"
+                  << std::endl;
+      }
+      else
+      {
+        reply["status"]  = "error";
+        reply["message"] = "Certificate signing failed for: " + cn;
+      }
+    }
+    else if (subcmd == "RM")
+    {
+      std::string cn = params.get("callsign", "").asString();
+      if (cn.empty())
+      {
+        reply["status"]  = "error";
+        reply["message"] = "Missing callsign. Usage: CA RM <callsign>";
+        goto publish_reply;
+      }
+      if (removeClientCertFiles(cn))
+      {
+        reply["callsign"] = cn;
+        std::cout << cn << ": Removed client certificate and CSR" << std::endl;
+      }
+      else
+      {
+        reply["status"]  = "error";
+        reply["message"] = "Failed to remove certificate and CSR for: " + cn;
+      }
+    }
+    else if (subcmd == "LS" || subcmd == "LSC" || subcmd == "LSP")
+    {
+      bool want_signed  = (subcmd == "LS" || subcmd == "LSC");
+      bool want_pending = (subcmd == "LS" || subcmd == "LSP");
+
+      if (want_signed)
+      {
+        Json::Value signed_arr(Json::arrayValue);
+        for (const auto& info : getAllCerts())
+        {
+          Json::Value entry(Json::objectValue);
+          entry["callsign"]   = info.callsign;
+          entry["valid_until"] = info.valid_until;
+          entry["not_after"]  = static_cast<Json::Int64>(info.not_after);
+          signed_arr.append(entry);
+        }
+        reply["signed_certs"] = signed_arr;
+      }
+      if (want_pending)
+      {
+        Json::Value pending_arr(Json::arrayValue);
+        for (const auto& info : getAllPendingCSRs())
+        {
+          Json::Value entry(Json::objectValue);
+          entry["callsign"] = info.callsign;
+          Json::Value emails(Json::arrayValue);
+          for (const auto& e : info.emails) emails.append(e);
+          entry["emails"]        = emails;
+          entry["received_time"] = static_cast<Json::Int64>(info.received_time);
+          pending_arr.append(entry);
+        }
+        reply["pending_csrs"] = pending_arr;
+      }
+    }
+    else if (subcmd.empty())
+    {
+      reply["status"]  = "error";
+      reply["message"] = "Missing CA subcommand. Usage: CA LS|LSC|LSP|SIGN <callsign>|RM <callsign>";
+    }
+    else
+    {
+      reply["status"]  = "error";
+      reply["message"] = "Unknown CA subcommand '" + subcmd + "'. Valid: LS, LSC, LSP, SIGN, RM";
+    }
+  }
+  else
+  {
+    reply["status"]  = "error";
+    reply["message"] = "Unknown command '" + cmd + "'. Valid commands: CFG, NODE, CA";
+  }
+
+  publish_reply:
+    if (reply["status"].asString() == "error")
+    {
+      std::cerr << "*** MQTT CMD ERROR: " << reply.get("message", "").asString()
+                << std::endl;
+    }
+    if (m_mqtt_client && m_mqtt_client->isConnected() &&
+        !m_mqtt_cmd_reply_topic.empty())
+    {
+      Json::StreamWriterBuilder writer;
+      writer["indentation"] = "";
+      std::string json_str = Json::writeString(writer, reply);
+      try
+      {
+        m_mqtt_client->publish(m_mqtt_cmd_reply_topic, json_str, 1, false);
+      }
+      catch (...)
+      {
+        std::cerr << "MQTT: Failed to publish command reply" << std::endl;
+      }
+    }
+} /* Reflector::mqttCommandReceived */
+#endif
 
 
 void Reflector::cfgUpdated(const std::string& section, const std::string& tag)
