@@ -6,7 +6,7 @@
 
 \verbatim
 SvxReflector - An audio reflector for connecting SvxLink Servers
-Copyright (C) 2003-2025 Tobias Blomberg / SM0SVX
+Copyright (C) 2003-2026 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -39,6 +39,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <functional>
 #include <cstring>
 #include <iomanip>
+#include <dirent.h>   // for listing directories (list certs)
+#include <sys/stat.h> // for checking if a directory exists (list certs)
 
 
 /****************************************************************************
@@ -708,12 +710,15 @@ std::string Reflector::issuingCertPem(void) const
 } /* Reflector::issuingCertPem */
 
 
-bool Reflector::callsignOk(const std::string& callsign) const
+bool Reflector::callsignOk(const std::string& callsign, bool verbose) const
 {
     // Empty check
   if (callsign.empty())
   {
-    std::cout << "*** WARNING: The callsign is empty" << std::endl;
+    if (verbose)
+    {
+      std::cout << "*** WARNING: The callsign is empty" << std::endl;
+    }
     return false;
   }
 
@@ -729,9 +734,15 @@ bool Reflector::callsignOk(const std::string& callsign) const
   if (!std::regex_match(callsign, accept_callsign_re))
   {
     std::string msg = "*** WARNING: The callsign '" + callsign + "' is not accepted by configuration (ACCEPT_CALLSIGN)";
-    std::cerr << msg << std::endl;
+    
+    if (verbose)
+    {
+      std::cerr << msg << std::endl;
+    }
+
 #ifdef HAVE_MQTT
-    if(m_mqtt_handler) {
+    if(m_mqtt_handler) 
+    {
       Json::Value client_data;
       client_data["callsign"] = callsign;
       client_data["event"] = "reject";
@@ -740,6 +751,7 @@ bool Reflector::callsignOk(const std::string& callsign) const
       m_mqtt_handler->publishSystemEvent("callsigns", client_data);
     }
 #endif
+
     return false;
   }
 
@@ -752,10 +764,14 @@ bool Reflector::callsignOk(const std::string& callsign) const
     if (std::regex_match(callsign, reject_callsign_re))
     {
       std::string msg = "*** WARNING: The callsign '" + callsign + "' has been rejected by configuration (REJECT_CALLSIGN).";
-      std::cerr << msg << std::endl;
+      if (verbose)
+      {
+        std::cerr << msg << std::endl;
+      }
 
 #ifdef HAVE_MQTT
-      if(m_mqtt_handler) {
+      if(m_mqtt_handler) 
+      {
         Json::Value client_data;
         client_data["callsign"] = callsign;
         client_data["event"] = "reject";
@@ -764,6 +780,7 @@ bool Reflector::callsignOk(const std::string& callsign) const
         m_mqtt_handler->publishSystemEvent("callsigns", client_data);
       }
 #endif
+
       return false;
     }
   }
@@ -1814,7 +1831,36 @@ void Reflector::ctrlPtyDataReceived(const void *buf, size_t count)
     // For PTY, print config values to console instead of returning them
     if (response.result == CommandResult::SUCCESS && response.message.find("Configuration updated") == std::string::npos)
     {
-      std::cout << response.message << std::endl;
+      m_cfg->setValue(section, tag, value);
+      m_cmd_pty->write("Trying to set config : " + section + "/" +
+                       tag + "=" + value + "\n");
+    }
+    else if (!tag.empty())
+    {
+      m_cmd_pty->write("Get config : " + section + "/" +
+                       tag + "=\"" + m_cfg->getValue(section, tag) + "\"\n");
+    }
+    else if (!section.empty())
+    {
+      m_cmd_pty->write("Section: \n\t" + section + "\n");
+      for (const auto& tag : m_cfg->listSection(section))
+      {
+          m_cmd_pty->write("\t" + tag +
+                           "=\"" + m_cfg->getValue(section, tag) + "\"\n");
+      }
+    }
+    else
+    {
+      for (const auto& section : m_cfg->listSections())
+      {
+        m_cmd_pty->write("Section: \n\t" + section + "\n");
+        for (const auto& tag : m_cfg->listSection(section))
+        {
+          m_cmd_pty->write("\t\t" + tag +
+                           "=\"" + m_cfg->getValue(section, tag) + "\"\n");
+        }
+        m_cmd_pty->write("\n");
+      }
     }
   }
   else if (cmd == "NODE")
@@ -1827,20 +1873,56 @@ void Reflector::ctrlPtyDataReceived(const void *buf, size_t count)
     // Special handling for CA SIGN success - print certificate details
     if (response.result == CommandResult::SUCCESS && response.message.find("Certificate signed") != std::string::npos)
     {
-      std::string cn = response.message.substr(response.message.find("for ") + 4);
-      auto cert = loadClientCertificate(cn);
+      errss << "Invalid CA PTY command '" << cmdline << "'. "
+               "Usage: CA LS|LSC|LSP|SIGN <callsign>|RM <callsign>";
+      goto write_status;
+    }
+    std::transform(subcmd.begin(), subcmd.end(), subcmd.begin(), ::toupper);
+    if (subcmd == "SIGN")
+    {
+      std::string cn;
+      if (!(ss >> cn))
+      {
+        errss << "Invalid CA SIGN PTY command '" << cmdline << "'. "
+                 "Usage: CA SIGN <callsign>";
+        goto write_status;
+      }
+      auto cert = signClientCsr(cn);
       if (!cert.isNull())
       {
-        std::cout << "---------- Signed Client Certificate ----------" << std::endl;
-        cert.print(" ");
-        std::cout << "-----------------------------------------------" << std::endl;
+        m_cmd_pty->write("---------- Signed Client Certificate ----------\n");
+        m_cmd_pty->write(cert.toString());
+        m_cmd_pty->write("-----------------------------------------------\n");
+        std::cout << "---------- Signed Client Certificate ----------\n"
+                  << cert.toString()
+                  << "-----------------------------------------------"
+                  << std::endl;
+      }
+      else
+      {
+        errss << "Certificate signing failed";
       }
     }
     // Special handling for CA RM success - print confirmation
     else if (response.result == CommandResult::SUCCESS && response.message.find("Removed client certificate") != std::string::npos)
     {
-      std::string cn = response.message.substr(response.message.rfind(" ") + 1);
-      std::cout << cn << ": Removed client certificate and CSR" << std::endl;
+      std::string cn;
+      if (!(ss >> cn))
+      {
+        errss << "Invalid CA RM PTY command '" << cmdline << "'. "
+                 "Usage: CA RM <callsign>";
+        goto write_status;
+      }
+      if (removeClientCertFiles(cn))
+      {
+        std::string msg(cn + ": Removed client certificate and CSR");
+        m_cmd_pty->write(msg + "\n");
+        std::cout << msg << std::endl;
+      }
+      else
+      {
+        errss << "Failed to remove certificate and CSR for '" << cn << "'";
+      }
     }
   }
   else if (cmd == "CFG_SAVE")
@@ -1848,15 +1930,31 @@ void Reflector::ctrlPtyDataReceived(const void *buf, size_t count)
     response = handleCfgSaveCommand();
     if (response.result == CommandResult::SUCCESS)
     {
-      std::cout << response.message << std::endl;
+        // List all certs and pending CSRs
+      std::string certs = formatCerts();
+      m_cmd_pty->write(certs);
     }
-  }
-  else if (cmd == "CFG_DISCARD")
-  {
-    response = handleCfgDiscardCommand();
-    if (response.result == CommandResult::SUCCESS)
+    else if (subcmd == "LSC")
     {
-      std::cout << response.message << std::endl;
+        // List only certificates
+      std::string certs = formatCerts(true, false);
+      m_cmd_pty->write(certs);
+    }
+    else if (subcmd == "LSP")
+    {
+        // List only pending CSRs
+      std::string certs = formatCerts(false, true);
+      m_cmd_pty->write(certs);
+    }
+    // FIXME: Implement when we have CRL support
+    //else if (subcmd == "REVOKE")
+    //{
+    //}
+    else
+    {
+      errss << "Invalid CA PTY command '" << cmdline << "'. "
+               "Usage: CA LS|LSC|LSP|SIGN <callsign>|RM <callsign>";
+      goto write_status;
     }
   }
   else if (cmd == "CFG_SHOW")
@@ -1866,7 +1964,12 @@ void Reflector::ctrlPtyDataReceived(const void *buf, size_t count)
   }
   else
   {
-    response = {CommandResult::ERROR, "Unknown PTY command '" + cmdline + "'. Valid commands are: CFG, CFG_SAVE, CFG_DISCARD, CFG_SHOW, NODE, CA"};
+    errss << "Valid commands are: CFG, NODE, CA\n"
+          << "Usage:\n"
+          << "CFG <section> <tag> <value>\n"
+          << "NODE BLOCK <callsign> <blocktime seconds>\n"
+          << "CA LS|LSC|LSP|SIGN <callsign>|RM <callsign>\n"
+          << "\nEmpty CFG lists all configuration";
   }
 
   if (response.result == CommandResult::ERROR)
@@ -2496,11 +2599,35 @@ bool Reflector::buildPath(const std::string& sec,    const std::string& tag,
 } /* Reflector::buildPath */
 
 
-bool Reflector::removeClientCert(const std::string& cn)
+bool Reflector::removeClientCertFiles(const std::string& cn)
 {
-  std::cout << "### Reflector::removeClientCert: cn=" << cn << std::endl;
-  return true;
-} /* Reflector::removeClientCert */
+  //std::cout << "### Reflector::removeClientCertFiles: cn=" << cn << std::endl;
+
+  std::vector<std::string> paths = {
+    m_csrs_dir + "/" + cn + ".csr",
+    m_pending_csrs_dir + "/" + cn + ".csr",
+    m_certs_dir + "/" + cn + ".crt"
+  };
+
+  bool success = true;
+  size_t path_unlink_cnt = 0;
+  for (const auto& path : paths)
+  {
+    if (unlink(path.c_str()) == 0)
+    {
+      path_unlink_cnt += 1;
+    }
+    else if (errno != ENOENT)
+    {
+      success = false;
+      auto errstr = SvxLink::strError(errno);
+      std::cerr << "*** WARNING: Failed to remove file '" << path << "': "
+                << errstr << std::endl;
+    }
+  }
+
+  return success && (path_unlink_cnt > 0);
+} /* Reflector::removeClientCertFiles */
 
 
 void Reflector::runCAHook(const Async::Exec::Environment& env)
@@ -2542,6 +2669,205 @@ void Reflector::runCAHook(const Async::Exec::Environment& env)
   }
 } /* Reflector::runCAHook */
 
+std::vector<CertInfo> Reflector::getAllCerts(void)
+{
+  std::vector<CertInfo> certs;
+
+  DIR* dir = opendir(m_certs_dir.c_str());
+  if (dir != nullptr)
+  {
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr)
+    {
+      std::string filename(entry->d_name);
+      if (filename.length() > 4 &&
+          filename.substr(filename.length() - 4) == ".crt")
+      {
+        std::string callsign = filename.substr(0, filename.length() - 4);
+        Async::SslX509 cert = loadClientCertificate(callsign);
+        if (!cert.isNull() && callsignOk(callsign, false))
+        {
+          CertInfo info;
+          info.callsign = cert.commonName();
+          info.is_signed = true;
+          info.valid_until = cert.notAfterLocaltimeString();
+          info.not_after = cert.notAfter();
+          info.received_time = 0;
+
+          certs.push_back(info);
+        }
+      }
+    }
+    closedir(dir);
+
+    std::sort(certs.begin(), certs.end(),
+        [](const CertInfo& a, const CertInfo& b)
+        {
+          return a.callsign < b.callsign;
+        });
+  }
+
+  return certs;
+} /* Reflector::getAllCerts */
+
+
+std::vector<CertInfo> Reflector::getAllPendingCSRs(void)
+{
+  std::vector<CertInfo> certs;
+
+  DIR* dir = opendir(m_pending_csrs_dir.c_str());
+  if (dir != nullptr)
+  {
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != nullptr)
+    {
+      std::string filename(entry->d_name);
+      if (filename.length() > 4 &&
+          filename.substr(filename.length() - 4) == ".csr")
+      {
+        std::string callsign = filename.substr(0, filename.length() - 4);
+        Async::SslCertSigningReq csr = loadClientPendingCsr(callsign);
+        if (!csr.isNull())
+        {
+          CertInfo info;
+          info.callsign = csr.commonName();
+          info.is_signed = false;
+          info.valid_until = "";
+          info.not_after = 0;
+
+            // Extract email addresses, might be useful to contact user or
+            // check against a database
+          const auto san = csr.extensions().subjectAltName();
+          if (!san.isNull())
+          {
+            san.forEach(
+                [&](int type, std::string value)
+                {
+                  info.emails.push_back(value);
+                },
+                GEN_EMAIL);
+          }
+
+            // Get file timestamp
+          std::string csr_path = m_pending_csrs_dir + "/" + callsign + ".csr";
+          struct stat st;
+          if (stat(csr_path.c_str(), &st) == 0)
+          {
+            info.received_time = st.st_mtime;
+          }
+          else
+          {
+            info.received_time = 0;
+          }
+
+          certs.push_back(info);
+        }
+      }
+    }
+    closedir(dir);
+
+    std::sort(certs.begin(), certs.end(),
+        [](const CertInfo& a, const CertInfo& b)
+        {
+          return a.callsign < b.callsign;
+        });
+  }
+
+  return certs;
+} /* Reflector::getAllPendingCSRs */
+
+
+std::string Reflector::formatCerts(bool signedCerts, bool pendingCerts)
+{
+  std::ostringstream ss;
+
+  if (signedCerts && pendingCerts)
+  {
+    ss << "------------ All Certificates/CSRs ------------\n";
+  }
+  else if (signedCerts && !pendingCerts)
+  {
+    ss << "------------- Signed Certificates -------------\n";
+  }
+  else if (!signedCerts && pendingCerts)
+  {
+    ss << "---------------- Pending CSRs -----------------\n";
+  }
+  else
+  {
+    return "ERR:Neither certificates nor CSRs requested\n";
+  }
+
+  auto signed_certs_list = getAllCerts();
+  auto pending_certs_list = getAllPendingCSRs();
+  if (signedCerts)
+  {
+    ss << "Signed Certificates:\n";
+
+    if (signed_certs_list.empty())
+    {
+      ss << "\t(none)\n";
+    }
+    else
+    {
+      size_t max_cn_len = 0;
+      for (const auto& info : signed_certs_list)
+      {
+        if (info.callsign.size() > max_cn_len)
+        {
+          max_cn_len = info.callsign.size();
+        }
+      }
+      for (const auto& info : signed_certs_list)
+      {
+        ss << "\t" << std::left << std::setw(max_cn_len) << info.callsign
+           << "  Valid until: " << info.valid_until << "\n";
+      }
+    }
+  }
+
+  if (pendingCerts)
+  {
+    ss << "Pending CSRs (awaiting signing):\n";
+
+    if (pending_certs_list.empty())
+    {
+      ss << "\t(none)\n";
+    }
+    else
+    {
+      size_t max_cn_len = 0;
+      for (const auto& info : pending_certs_list)
+      {
+        if (info.callsign.size() > max_cn_len)
+        {
+          max_cn_len = info.callsign.size();
+        }
+      }
+      for (const auto& info : pending_certs_list)
+      {
+        ss << "\t" << std::left << std::setw(max_cn_len) << info.callsign;
+        if (!info.emails.empty())
+        {
+            // Join all emails in one string
+          std::string emails_str = std::accumulate(
+            std::next(info.emails.begin()),
+            info.emails.end(),
+            info.emails.empty() ? std::string() : info.emails[0],
+            [](const std::string& a, const std::string& b)
+            {
+              return a + ", " + b;
+            });
+          ss << "  Email: " << emails_str;
+        }
+        ss << "\n";
+      }
+    }
+  }
+
+  ss << "-----------------------------------------------\n";
+  return ss.str();
+} /* Reflector::formatCerts */
 
 #ifdef HAVE_MQTT
 
@@ -2881,10 +3207,6 @@ bool Reflector::loadStateFile(void)
       }
     }
   }
-
-  return true;
-} /* Reflector::loadStateFile */
-
 
 bool Reflector::saveStateFile(void)
 {
