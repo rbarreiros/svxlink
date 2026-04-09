@@ -333,7 +333,7 @@ int main(int argc, char** argv)
   cout << "\nUsing configuration file: " << main_cfg_filename << "\n" << endl;
 
   player = new SvxPlayer;
-  if (!player->initialize(cfg))
+  if (!player->initialize(cfg, "SvxPlayer"))
   {
     cerr << "*** ERROR: Failed to initialize SvxPlayer" << endl;
     delete player;

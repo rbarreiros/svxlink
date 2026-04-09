@@ -196,6 +196,28 @@ Json::Value WebBridge::buildNodeInfo(void) const
 } /* WebBridge::buildNodeInfo */
 
 
+std::vector<std::string> WebBridge::availableCodecs(void)
+{
+    // WebBridge is a raw-byte pass-through; it does not decode audio locally.
+    // Advertise every known codec so that negotiation is driven only by what
+    // the server supports (and any CODEC= preference set by the operator).
+  return { "OPUS", "SPEEX", "GSM", "S16", "RAW" };
+} /* WebBridge::availableCodecs */
+
+
+void WebBridge::onCodecNegotiated(const std::string& negotiated_codec)
+{
+    // Notify any already-connected WebSocket clients about the agreed codec.
+    // (Clients that connect later receive this via sendCodecInfoTo().)
+  Json::Value msg;
+  msg["type"]        = "codec";
+  msg["name"]        = negotiated_codec;
+  msg["sample_rate"] = 16000;
+  msg["channels"]    = 1;
+  m_ws_server.broadcastJson(msg);
+} /* WebBridge::onCodecNegotiated */
+
+
 /****************************************************************************
  *
  * Private member functions

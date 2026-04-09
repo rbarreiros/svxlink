@@ -80,6 +80,10 @@ Additional configuration keys (beyond those of ReflectorClient):
   MONITOR_TGS         – comma/space-separated list of TG numbers to monitor
                         at startup (the union of all web clients' subscriptions
                         is added dynamically on top of this set)
+  CODEC               – preferred audio codec to request from the reflector
+                        (OPUS|SPEEX|GSM|…). Defaults to OPUS if not set.
+                        WebBridge forwards raw encoded bytes, so any codec
+                        the server offers is usable.
 */
 class WebBridge : public ReflectorClient
 {
@@ -112,6 +116,18 @@ class WebBridge : public ReflectorClient
     void onQsyRequest(uint32_t tg) override;
 
     Json::Value buildNodeInfo(void) const override;
+
+    /**
+     * @brief   Return all codec names supported by this bridge
+     *
+     * WebBridge is a raw-byte pass-through; it does not decode audio locally,
+     * so every codec the reflector offers is usable.  We therefore return the
+     * full list of all known codec names so that negotiation is driven purely
+     * by what the server supports (plus any CODEC= preference).
+     */
+    static std::vector<std::string> availableCodecs(void);
+
+    void onCodecNegotiated(const std::string& codec) override;
 
   private:
     WsServer                        m_ws_server;

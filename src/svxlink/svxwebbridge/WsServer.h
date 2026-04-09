@@ -25,6 +25,7 @@ the Free Software Foundation; either version 2 of the License, or
  ****************************************************************************/
 
 #include <cstdint>
+#include <sigc++/sigc++.h>
 #include <string>
 #include <vector>
 #include <map>
@@ -74,12 +75,12 @@ class WsClient : public sigc::trackable
     /**
      * @brief   Emitted when the client sends a complete JSON text message
      */
-    sigc::signal<void, WsClient*, Json::Value> messageReceived;
+    sigc::signal<void(WsClient*, Json::Value)> messageReceived;
 
     /**
      * @brief   Emitted when the connection is fully closed
      */
-    sigc::signal<void, WsClient*> disconnected;
+    sigc::signal<void(WsClient*)> disconnected;
 
     /**
      * @brief   Send a JSON object as a WebSocket text frame
@@ -206,12 +207,12 @@ class WsServer : public sigc::trackable
     /**
      * @brief   Emitted when a client subscribes to a TG
      */
-    sigc::signal<void, WsClient*, uint32_t> clientSubscribed;
+    sigc::signal<void(WsClient*, uint32_t)> clientSubscribed;
 
     /**
      * @brief   Emitted when a client unsubscribes / disconnects
      */
-    sigc::signal<void, WsClient*> clientUnsubscribed;
+    sigc::signal<void(WsClient*)> clientUnsubscribed;
 
   private:
     Async::TcpServer<Async::TcpConnection>* m_server = nullptr;

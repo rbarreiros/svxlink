@@ -40,12 +40,13 @@ include_directories(${JSONCPP_INCLUDE_DIRS})
 set(LIBS ${LIBS} ${JSONCPP_LIBRARIES})
 
 # Add project libraries (no trx or locationinfo needed)
-set(LIBS asynccpp asyncaudio asynccore svxmisc ${LIBS})
+set(LIBS reflectorclient asynccpp asyncaudio asynccore svxmisc ${LIBS})
 
 # Include paths for MsgHandler and reflector messages
 include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/../svxlink
   ${CMAKE_CURRENT_SOURCE_DIR}/../reflector
+  ${CMAKE_CURRENT_SOURCE_DIR}/../reflectorclient
   )
 
 # Build the executable

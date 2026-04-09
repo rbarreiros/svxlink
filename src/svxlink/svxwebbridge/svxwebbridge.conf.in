@@ -43,6 +43,13 @@ HOSTS=reflector.example.com
 # UDP heartbeat interval in seconds (default 15)
 #UDP_HEARTBEAT_INTERVAL=15
 
+# Preferred audio codec to request from the reflector.
+# WebBridge forwards raw encoded bytes to WebSocket clients without
+# local decoding, so any codec the server offers is usable.
+# Default: OPUS (recommended). Falls back automatically if unavailable.
+# Valid values: OPUS, SPEEX, GSM, S16, RAW
+#CODEC=OPUS
+
 ###############################################################################
 # Talk group monitoring
 ###############################################################################

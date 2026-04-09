@@ -96,8 +96,9 @@ HOSTS=reflector.example.org
 DEFAULT_TG=999
 
 # Audio codec to use between svxplayer and the reflector.
-# Available: OPUS (default), SPEEX, GSM, S16, RAW
-# The reflector must support the chosen codec; OPUS is recommended.
+# If not set, OPUS is used by default (recommended). If OPUS is not supported
+# by the server, the best mutually supported codec is selected automatically.
+# Valid values: OPUS, SPEEX, GSM, S16, RAW
 #CODEC=OPUS
 
 # Path of the PTY symlink for on-demand command input.

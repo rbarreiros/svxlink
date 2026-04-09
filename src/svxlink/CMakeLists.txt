@@ -13,12 +13,10 @@ add_subdirectory(modules)
 #add_subdirectory(scripts)
 add_subdirectory(remotetrx)
 add_subdirectory(reflector)
-<<<<<<< HEAD
 add_subdirectory(reflectorclient)
 add_subdirectory(svxwebbridge)
-=======
 add_subdirectory(player)
->>>>>>> origin/svxplayer2
 add_subdirectory(siglevdetcal)
 add_subdirectory(devcal)
+add_subdirectory(usrpclient)
 add_subdirectory(contrib)

@@ -1,0 +1,145 @@
+###############################################################################
+#
+# UsrpClient configuration file
+#
+# Standalone bridge between an SvxReflector and a USRP endpoint.
+# (Analog Bridge, AllStar, MMDVM_Bridge, DVSwitch, etc.)
+#
+# Run: usrpclient --config /etc/svxlink/usrpclient.conf
+#
+###############################################################################
+
+[GLOBAL]
+# Optionally point to a directory from which additional .conf files are loaded
+#CFG_DIR=@SVX_SYSCONF_INSTALL_DIR@/usrpclient.d
+
+[UsrpClient]
+
+###############################################################################
+# Reflector connection settings (shared with ReflectorLogic)
+###############################################################################
+
+# Your station callsign (required)
+CALLSIGN=MYCALL
+
+# Shared secret for HMAC-SHA1 authentication (legacy, pre-TLS protocol)
+#AUTH_KEY="Change this key now!"
+
+# One or more reflector hostnames (and optional :port), space-separated.
+HOSTS=reflector.example.org
+
+# TCP/UDP port of the reflector (default: 5300)
+#HOST_PORT=5300
+
+# SRV DNS domain for automatic reflector discovery (alternative to HOSTS)
+#DNS_DOMAIN=example.com
+
+# UDP heartbeat interval in seconds (default: 15)
+#UDP_HEARTBEAT_INTERVAL=15
+
+# Enable verbose node join/leave messages (0 or 1)
+#VERBOSE=1
+
+###############################################################################
+# Certificate / PKI settings (same as ReflectorLogic)
+###############################################################################
+
+# Directory where PKI files (key, csr, crt, CA bundle) are stored
+#CERT_PKI_DIR=@SVX_LOCAL_STATE_DIR@/pki/usrpclient
+
+# E-mail address(es) added to the client certificate SAN field.
+#CERT_EMAIL=operator@example.com
+
+# Download CA bundle from server if missing or outdated (0 or 1, default: 1)
+#CERT_DOWNLOAD_CA_BUNDLE=1
+
+###############################################################################
+# Audio codec
+###############################################################################
+
+# Codec to negotiate with the reflector.
+# If not set, OPUS is preferred (recommended).  If OPUS is not supported by
+# the server, the best mutually supported codec is chosen automatically.
+# Valid values: OPUS, SPEEX, GSM, S16, RAW
+#CODEC=OPUS
+
+###############################################################################
+# USRP endpoint settings
+###############################################################################
+
+# Hostname or IP address of the USRP peer (required)
+# (Analog Bridge, AllStarLink, MMDVM_Bridge, DVSwitch, etc.)
+USRP_HOST=127.0.0.1
+
+# UDP port to send audio *to* the USRP peer (Analog Bridge rx_port)
+USRP_TX_PORT=41234
+
+# UDP port to *receive* audio from the USRP peer (Analog Bridge tx_port)
+USRP_RX_PORT=41233
+
+###############################################################################
+# Talk group settings
+###############################################################################
+
+# Default talk group to select after login (0 = none)
+DEFAULT_TG=9
+
+# Space/comma-separated list of TG IDs to monitor after login
+# (in addition to the selected TG)
+#MONITOR_TGS=9 240
+
+###############################################################################
+# DMR / Digital metadata
+###############################################################################
+
+# DMR ID to include in USRP metadata frames (optional, default 0)
+#DMRID=1234567
+
+# Repeater ID for USRP metadata (optional, default 0)
+#RPTID=1234567
+
+# Default DMR time-slot (1 or 2, default: 1)
+#DEFAULT_TS=1
+
+# Default DMR colour code (0-15, default: 1)
+#DEFAULT_CC=1
+
+###############################################################################
+# Audio processing
+###############################################################################
+
+# Preamp/gain (dB) applied to outgoing audio before the encoder.
+# Positive values increase level, negative values decrease it.
+#PREAMP=0
+
+# Gain (dB) applied to incoming (network) audio after decoding.
+#NET_PREAMP=0
+
+# Jitter buffer size in milliseconds on the incoming (USRP→reflector) path.
+# Set to 0 to disable (default: 0).
+#JITTER_BUFFER_DELAY=0
+
+# Biquad IIR filter specification applied to audio going *to* the USRP.
+# Examples:
+#   BpBu1/600-3500   – 600 Hz to 3.5 kHz bandpass
+#FILTER_TO_USRP=
+
+# Biquad IIR filter specification applied to audio coming *from* the USRP.
+# Examples:
+#   HsBq2/0.01/-18/4000  – suppress frequencies above 4 kHz
+#FILTER_FROM_USRP=
+
+# Audio compressor threshold for the incoming (net→local) path.
+# Set to 0 to disable (default: -1.0 = enabled).
+#NET_LIMITER_THRESH=-1.0
+
+# Audio compressor threshold for the outgoing (local→net) path.
+# Set to 0 to disable (default: -1.0 = enabled).
+#LOCAL_LIMITER_THRESH=-1.0
+
+###############################################################################
+# Debugging
+###############################################################################
+
+# Verbosity level: 0=errors only, 1=warnings, 2=info, 3=debug (default: 0)
+#DEBUG=0

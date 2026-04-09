@@ -44,6 +44,8 @@ the Free Software Foundation; either version 2 of the License, or
 #include <AsyncSslCertSigningReq.h>
 #include <AsyncEncryptedUdpSocket.h>
 #include <AsyncIpAddress.h>
+#include <AsyncAudioEncoder.h>
+#include <AsyncAudioDecoder.h>
 #include <version/SVXLINK.h>
 #include <config.h>
 
@@ -187,6 +189,7 @@ bool ReflectorClient::initialize(Async::Config& cfg, const std::string& section)
 
   cfg.getValue(section, "AUTH_KEY", m_auth_key);
   cfg.getValue(section, "UDP_HEARTBEAT_INTERVAL", m_udp_heartbeat_tx_cnt_reset);
+  cfg.getValue(section, "CODEC", m_preferred_codec);
 
   Async::Application::app().runTask([this]{ connect(); });
   return true;
@@ -249,6 +252,24 @@ bool ReflectorClient::isConnected(void) const
 } /* ReflectorClient::isConnected */
 
 
+std::vector<std::string> ReflectorClient::availableCodecs(void)
+{
+  // Build a list of all codecs that both the encoder and decoder support,
+  // in preference order (best quality first).
+  static const char* CANDIDATES[] = {
+    "OPUS", "SPEEX", "GSM", "S16", "RAW", nullptr
+  };
+  std::vector<std::string> codecs;
+  for (const char** c = CANDIDATES; *c != nullptr; ++c)
+  {
+    if (Async::AudioEncoder::isAvailable(*c) &&
+        Async::AudioDecoder::isAvailable(*c))
+    {
+      codecs.push_back(*c);
+    }
+  }
+  return codecs;
+} /* ReflectorClient::availableCodecs */
 /****************************************************************************
  *
  * Protected member functions
@@ -807,22 +828,90 @@ void ReflectorClient::handleMsgServerInfo(std::istream& is)
   }
   std::cout << std::endl;
 
-    // Pick the first codec offered by the server.
-    // We forward raw bytes to the application layer, so no local
-    // encoder/decoder check is required here.
-  if (!msg.codecs().empty())
+    // Negotiate codec.
+    //
+    // Priority:
+    //   1. CODEC= config value (explicit user preference)
+    //   2. OPUS (safe default – best quality codec in most deployments)
+    //   3. Walk availableCodecs() in preference order (OPUS→SPEEX→GSM→…)
+    //      against what the server offers.
+    //
+    // For each candidate, check both the server list and local availability.
+    // A codec is "locally available" as reported by availableCodecs(); for
+    // pass-through subclasses (e.g. WebBridge) that override availableCodecs()
+    // to return all codecs, this simply means the server offers it.
   {
-    m_codec = msg.codecs().front();
+    const auto& server_codecs = msg.codecs();
+    if (server_codecs.empty())
+    {
+      std::cerr << "*** ERROR[" << m_section
+                << "]: No codec offered by server" << std::endl;
+      disconnect();
+      return;
+    }
+
+    const auto local_codecs = availableCodecs();
+
+    m_codec.clear(); // reset in case this is a reconnect
+
+    // Helper lambda: check whether a codec is mutually supported.
+    auto mutuallySupported = [&](const std::string& c) -> bool {
+      bool srv = std::find(server_codecs.begin(), server_codecs.end(), c)
+                 != server_codecs.end();
+      bool loc = std::find(local_codecs.begin(), local_codecs.end(), c)
+                 != local_codecs.end();
+      return srv && loc;
+    };
+
+    // 1. Honour explicit CODEC= configuration entry.
+    if (!m_preferred_codec.empty())
+    {
+      if (mutuallySupported(m_preferred_codec))
+      {
+        m_codec = m_preferred_codec;
+      }
+      else
+      {
+        bool srv_has = std::find(server_codecs.begin(), server_codecs.end(),
+                                 m_preferred_codec) != server_codecs.end();
+        std::cerr << "*** WARNING[" << m_section << "]: Configured CODEC=\""
+                  << m_preferred_codec << "\" is not "
+                  << (srv_has ? "available locally" : "offered by the server")
+                  << ". Falling back to defaults." << std::endl;
+      }
+    }
+
+    // 2. If not set yet, try OPUS as the recommended default.
+    if (m_codec.empty() && mutuallySupported("OPUS"))
+    {
+      m_codec = "OPUS";
+    }
+
+    // 3. Walk our preference order and pick the first mutually supported codec.
+    if (m_codec.empty())
+    {
+      for (const auto& lc : local_codecs)
+      {
+        if (std::find(server_codecs.begin(), server_codecs.end(), lc)
+            != server_codecs.end())
+        {
+          m_codec = lc;
+          break;
+        }
+      }
+    }
+
+    if (m_codec.empty())
+    {
+      std::cerr << "*** ERROR[" << m_section
+                << "]: No mutually supported codec found" << std::endl;
+      disconnect();
+      return;
+    }
+
+    std::cout << m_section << ": Using audio codec \"" << m_codec << "\""
+              << std::endl;
   }
-  else
-  {
-    std::cerr << "*** ERROR[" << m_section
-              << "]: No codec offered by server" << std::endl;
-    disconnect();
-    return;
-  }
-  std::cout << m_section << ": Using audio codec \"" << m_codec << "\""
-            << std::endl;
 
   const auto cipher = EncryptedUdpSocket::fetchCipher(UdpCipher::NAME);
   if (cipher == nullptr)
@@ -880,6 +969,8 @@ void ReflectorClient::handleMsgServerInfo(std::istream& is)
 
   sendMsg(MsgNodeInfo(m_udp_cipher_iv_rand, m_udp_sock->cipherKey(),
                       node_info_os.str()));
+
+  onCodecNegotiated(m_codec);
 } /* ReflectorClient::handleMsgServerInfo */
 
 

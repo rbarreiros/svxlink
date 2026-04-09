@@ -114,6 +114,9 @@ Configuration keys (same as ReflectorLogic):
   CERT_DOWNLOAD_CA_BUNDLE – whether to download CA bundle from server
   VERBOSE            – log node join/leave events (default true)
   UDP_HEARTBEAT_INTERVAL  – seconds between UDP heartbeats (default 15)
+  CODEC              – preferred codec (OPUS, SPEEX, GSM, etc.); if the server
+                       supports it that codec is used, otherwise the best
+                       mutually supported codec is chosen automatically
 */
 class ReflectorClient : public sigc::trackable
 {
@@ -161,6 +164,15 @@ class ReflectorClient : public sigc::trackable
     const std::string& codec(void)        const { return m_codec; }
     uint32_t           selectedTg(void)   const { return m_selected_tg; }
     uint32_t           currentAudioTg(void) const { return m_current_audio_tg; }
+
+    /**
+     * @brief   Return the list of locally supported codec names
+     *
+     * The default implementation returns all codecs available in the linked
+     * Async::AudioEncoder/AudioDecoder libraries (OPUS, SPEEX, GSM, S16, RAW).
+     * Subclasses may override to restrict or reorder the list.
+     */
+    static std::vector<std::string> availableCodecs(void);
 
   protected:
     /**
@@ -226,6 +238,17 @@ class ReflectorClient : public sigc::trackable
     virtual void onAllSamplesFlushed(void) {}
 
     /**
+     * @brief   Called after codec negotiation completes
+     * @param   codec  The agreed codec name (e.g. "OPUS", "SPEEX", "GSM")
+     *
+     * Invoked from handleMsgServerInfo once a mutually-supported codec has been
+     * selected.  Subclasses that maintain an encoder/decoder pipeline (e.g.
+     * SvxPlayer) should override this to (re-)initialize that pipeline.
+     * The base implementation does nothing.
+     */
+    virtual void onCodecNegotiated(const std::string& codec) {}
+
+    /**
      * @brief   Override to add extra JSON fields to the MsgNodeInfo payload
      *          sent at login.  Return a JSON object; its members are merged.
      */
@@ -262,6 +285,7 @@ class ReflectorClient : public sigc::trackable
     std::string                     m_callsign;
     std::string                     m_auth_key;
     std::string                     m_codec;
+    std::string                     m_preferred_codec;
     std::string                     m_pki_dir;
     std::string                     m_cafile;
     std::string                     m_crtfile;
