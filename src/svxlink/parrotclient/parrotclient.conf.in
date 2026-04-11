@@ -112,5 +112,6 @@ MAX_DURATION=30000
 # Debugging
 ###############################################################################
 
-# Verbosity level: 0=errors only, 1=warnings, 2=info, 3=debug (default: 0)
+# Extra verbosity: set to 3 to print per-frame replay debug lines.  Errors,
+# warnings, and normal operational INFO (recording / replay) always go to stdout.
 #DEBUG=0

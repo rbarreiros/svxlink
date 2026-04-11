@@ -76,14 +76,15 @@ using namespace Async;
  ****************************************************************************/
 
 ParrotClient::ParrotClient(void)
-  : m_delay_timer(Timer::TYPE_ONESHOT),
-    m_playback_timer(Timer::TYPE_PERIODIC)
+    // Timer ctor is (timeout_ms, type, enabled) — not (type).  Passing only
+    // TYPE_PERIODIC made timeout_ms==1 and type stayed TYPE_ONESHOT, so
+    // exactly one playback tick fired before the timer disabled itself.
+  : m_delay_timer(0, Timer::TYPE_ONESHOT, false),
+    m_playback_timer(20, Timer::TYPE_PERIODIC, false)
 {
-  m_delay_timer.setEnable(false);
   m_delay_timer.expired.connect(
       sigc::mem_fun(*this, &ParrotClient::startReplay));
 
-  m_playback_timer.setEnable(false);
   m_playback_timer.expired.connect(
       sigc::mem_fun(*this, &ParrotClient::sendNextFrame));
 } /* ParrotClient::ParrotClient */
@@ -154,6 +155,7 @@ bool ParrotClient::initialize(Async::Config& cfg, const std::string& section)
 
 void ParrotClient::onConnected(void)
 {
+  m_remote_tx_active = false;
   log(LOGINFO, m_section + ": Connected to reflector");
 } /* ParrotClient::onConnected */
 
@@ -161,6 +163,7 @@ void ParrotClient::onConnected(void)
 void ParrotClient::onDisconnected(void)
 {
   log(LOGINFO, m_section + ": Disconnected from reflector");
+  m_remote_tx_active = false;
   stopReplay();
   clearBuffer();
 } /* ParrotClient::onDisconnected */
@@ -221,22 +224,17 @@ void ParrotClient::onAudioFlushed(uint32_t tg)
     return;
   }
 
-  if (m_buffer.empty())
+    // ReflectorClient synthesizes onAudioFlushed() after ~3 s without UDP
+    // audio while the TCP talker may still be active.  Starting replay then
+    // sets m_replaying and drops the remainder of the transmission.
+  if (m_remote_tx_active)
   {
-    log(LOGDEBUG, "Audio flushed but buffer is empty – nothing to replay");
-    clearBuffer();
+    log(LOGDEBUG, m_section + ": Ignoring onAudioFlushed while remote TX "
+                       "active (UDP gap watchdog)");
     return;
   }
 
-  log(LOGINFO, m_section + ": Recorded "
-      + to_string(m_buffer.size()) + " frame(s) ("
-      + to_string(m_buffered_ms) + " ms)"
-      + (m_overflow ? " [truncated at max duration]" : "")
-      + " – replaying in " + to_string(m_replay_delay_ms) + " ms");
-
-  m_recording = false;
-  m_delay_timer.reset();
-  m_delay_timer.setEnable(true);
+  scheduleReplay();
 } /* ParrotClient::onAudioFlushed */
 
 
@@ -247,24 +245,33 @@ void ParrotClient::onTalkerStart(uint32_t tg, const std::string& callsign)
     return;
   }
 
-    // If we're already replaying, abort it so we can record the new TX
+    // While replaying, ignore every talker (including our own parrot TX) until
+    // replay completes — no new recording, no buffer changes.
   if (m_replaying)
   {
-    log(LOGINFO, m_section + ": New talker during replay – aborting replay");
-    stopReplay();
-    clearBuffer();
+    if (callsign != this->callsign())
+    {
+      log(LOGINFO, m_section + ": Talker start: " + callsign + " on TG#"
+          + to_string(tg) + " – deferred until replay finishes");
+    }
+    return;
   }
 
-    // Don't record our own playback
   if (callsign == this->callsign())
   {
     return;
   }
 
+  log(LOGINFO, m_section + ": Talker start: " + callsign + " on TG#"
+      + to_string(tg));
+
+  clearBuffer();
+
+  m_remote_tx_active = true;
+  m_overflow         = false;
+
   log(LOGINFO, m_section + ": Recording from " + callsign
       + " on TG#" + to_string(tg));
-  m_recording  = true;
-  m_overflow   = false;
 } /* ParrotClient::onTalkerStart */
 
 
@@ -274,7 +281,17 @@ void ParrotClient::onTalkerStop(uint32_t tg, const std::string& callsign)
   {
     return;
   }
-  log(LOGDEBUG, m_section + ": Talker stop: " + callsign);
+
+  if (m_replaying)
+  {
+    log(LOGINFO, m_section + ": Talker stop: " + callsign
+        + " – ignored while replay active");
+    return;
+  }
+
+  log(LOGINFO, m_section + ": Talker stop: " + callsign);
+  m_remote_tx_active = false;
+  scheduleReplay();
 } /* ParrotClient::onTalkerStop */
 
 
@@ -292,6 +309,31 @@ Json::Value ParrotClient::buildNodeInfo(void) const
  * Private member functions
  *
  ****************************************************************************/
+
+void ParrotClient::scheduleReplay(void)
+{
+  if (m_replaying)
+  {
+    return;
+  }
+
+  if (m_buffer.empty())
+  {
+    log(LOGDEBUG, "Nothing to replay (buffer empty)");
+    clearBuffer();
+    return;
+  }
+
+  log(LOGINFO, m_section + ": Recorded "
+      + to_string(m_buffer.size()) + " frame(s) ("
+      + to_string(m_buffered_ms) + " ms)"
+      + (m_overflow ? " [truncated at max duration]" : "")
+      + " – replaying in " + to_string(m_replay_delay_ms) + " ms");
+
+  m_delay_timer.reset();
+  m_delay_timer.setEnable(true);
+} /* ParrotClient::scheduleReplay */
+
 
 void ParrotClient::startReplay(Async::Timer* /*t*/)
 {
@@ -358,13 +400,19 @@ void ParrotClient::clearBuffer(void)
   m_buffer.clear();
   m_buffered_ms = 0;
   m_overflow    = false;
-  m_recording   = false;
 } /* ParrotClient::clearBuffer */
 
 
 void ParrotClient::log(int level, const std::string& msg) const
 {
-  if (m_debug >= level)
+    // ERROR / WARN / INFO always go to stdout (same idea as ReflectorClient’s
+    // unconditional cout for talker events).  DEBUG lines only if DEBUG>=3.
+  if (level < LOGDEBUG)
+  {
+    cout << msg << "\n";
+    return;
+  }
+  if (m_debug >= LOGDEBUG)
   {
     cout << msg << "\n";
   }

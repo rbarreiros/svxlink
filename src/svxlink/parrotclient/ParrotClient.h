@@ -77,7 +77,8 @@ Configuration keys (in addition to all ReflectorClient keys):
                     This controls the pacing of the playback.  Should match
                     the codec frame size; 20 ms is correct for OPUS and GSM
                     at 8 kHz (default: 20)
-  DEBUG           – Verbosity 0=errors 1=warn 2=info 3=debug (default: 0)
+  DEBUG           – If >= 3, print per-frame replay debug.  Errors, warnings,
+                    and operational INFO are always printed (default: 0)
 */
 class ParrotClient : public ReflectorClient
 {
@@ -129,8 +130,15 @@ class ParrotClient : public ReflectorClient
     std::deque<Frame>   m_buffer;           // buffered encoded frames
     int                 m_buffered_ms  = 0; // accumulated duration in buffer
     bool                m_overflow     = false; // max duration exceeded
-    bool                m_recording    = false; // currently recording a TX
     bool                m_replaying    = false; // currently replaying
+
+    /**
+     * True between MsgTalkerStart and MsgTalkerStop for a remote station on
+     * DEFAULT_TG.  ReflectorClient also calls onAudioFlushed() after ~3 s of
+     * no UDP audio (local watchdog); that must NOT start replay while this
+     * flag is set or we would go m_replaying and drop the rest of the TX.
+     */
+    bool                m_remote_tx_active = false;
 
     // -- Playback state -------------------------------------------------------
     std::size_t         m_play_pos     = 0;
@@ -141,6 +149,7 @@ class ParrotClient : public ReflectorClient
     ParrotClient(const ParrotClient&)            = delete;
     ParrotClient& operator=(const ParrotClient&) = delete;
 
+    void scheduleReplay(void);
     void startReplay(Async::Timer* t = nullptr);
     void sendNextFrame(Async::Timer* t = nullptr);
     void stopReplay(void);
