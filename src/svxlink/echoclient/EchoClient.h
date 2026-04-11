@@ -28,6 +28,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include <regex.h>
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 
@@ -207,6 +208,13 @@ class EchoClient : public ReflectorClient
 
     // -- State ----------------------------------------------------------------
     bool                            m_reflector_is_rx   = false;
+
+    /**
+     * Last EchoLink INFO (NDATA) text per QSO — many clients (e.g. EchoLink for
+     * Android) resend the same station block on a timer; we only log when it
+     * changes so DEBUG stays readable.
+     */
+    std::unordered_map<const EchoLink::Qso*, std::string> m_last_qso_info_msg;
 
     // -- Audio pipeline -------------------------------------------------------
     // RX: Reflector encoded → m_dec (float PCM) → m_splitter → each Qso (GSM encode → UDP)

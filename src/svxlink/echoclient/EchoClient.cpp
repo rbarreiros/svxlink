@@ -700,6 +700,14 @@ void EchoClient::onQsoChatMsgReceived(const std::string& msg,
 void EchoClient::onQsoInfoMsgReceived(const std::string& msg,
                                       EchoLink::Qso* qso)
 {
+    // Remote apps often re-send identical INFO (NDATA) packets on a timer.
+  auto it = m_last_qso_info_msg.find(qso);
+  if (it != m_last_qso_info_msg.end() && it->second == msg)
+  {
+    return;
+  }
+  m_last_qso_info_msg[qso] = msg;
+
   log(LOGDEBUG, "EchoLink info from " + qso->remoteCallsign() + ": " + msg);
 } /* EchoClient::onQsoInfoMsgReceived */
 
@@ -841,6 +849,8 @@ void EchoClient::connectByNodeId(int node_id)
 
 void EchoClient::destroyQso(EchoLink::Qso* qso)
 {
+  m_last_qso_info_msg.erase(qso);
+
   if (m_splitter != nullptr) m_splitter->removeSink(qso);
   if (m_selector != nullptr) m_selector->removeSource(qso);
 
