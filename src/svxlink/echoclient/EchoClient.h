@@ -261,6 +261,8 @@ class EchoClient : public ReflectorClient
     void connectByNodeId(int node_id);
     void destroyQso(EchoLink::Qso* qso);
     EchoLink::Qso* findFirstTalker(void) const;
+    /** Remote EchoLink callsigns currently keyed (PTT), comma-separated. */
+    std::string activeEchoLinkCallsigns(void) const;
     int  numConnectedStations(void) const;
     void broadcastTalkerStatus(void);
     void updateDescription(void);

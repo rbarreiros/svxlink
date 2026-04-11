@@ -373,16 +373,32 @@ void EchoClient::onAllSamplesFlushed(void)
 
 void EchoClient::onTalkerStart(uint32_t tg, const std::string& callsign)
 {
-  log(LOGINFO, m_section + ": Reflector talker start TG#"
-      + to_string(tg) + " " + callsign);
+    // TalkerStart is from the reflector (ReflectorClient), not echolib.  The
+    // callsign is the reflector node; EchoLink-side PTT is correlated here
+    // when any connected QSO is already in receivingAudio() (small race if UDP
+    // audio starts after this TCP message).
+  string msg = m_section + ": Talker " + callsign + " starts on TG#"
+               + to_string(tg);
+  const string el_tx = activeEchoLinkCallsigns();
+  if (!el_tx.empty())
+  {
+    msg += " (EchoLink remote: " + el_tx + ")";
+  }
+  log(LOGINFO, msg);
   m_reflector_is_rx = true;
 } /* EchoClient::onTalkerStart */
 
 
 void EchoClient::onTalkerStop(uint32_t tg, const std::string& callsign)
 {
-  log(LOGINFO, m_section + ": Reflector talker stop TG#"
-      + to_string(tg) + " " + callsign);
+  string msg = m_section + ": Talker " + callsign + " stops on TG#"
+               + to_string(tg);
+  const string el_tx = activeEchoLinkCallsigns();
+  if (!el_tx.empty())
+  {
+    msg += " (EchoLink remote: " + el_tx + ")";
+  }
+  log(LOGINFO, msg);
   m_reflector_is_rx = false;
 } /* EchoClient::onTalkerStop */
 
@@ -880,6 +896,29 @@ EchoLink::Qso* EchoClient::findFirstTalker(void) const
   }
   return nullptr;
 } /* EchoClient::findFirstTalker */
+
+
+string EchoClient::activeEchoLinkCallsigns(void) const
+{
+  string out;
+  for (auto* q : m_qsos)
+  {
+    if (q->currentState() == EchoLink::Qso::STATE_DISCONNECTED)
+    {
+      continue;
+    }
+    if (!q->receivingAudio())
+    {
+      continue;
+    }
+    if (!out.empty())
+    {
+      out += ", ";
+    }
+    out += q->remoteCallsign();
+  }
+  return out;
+} /* EchoClient::activeEchoLinkCallsigns */
 
 
 int EchoClient::numConnectedStations(void) const
