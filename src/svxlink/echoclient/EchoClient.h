@@ -112,7 +112,9 @@ Configuration keys (in addition to all ReflectorClient keys):
 
   Misc:
     BIND_ADDR        – Local IP address to bind EchoLink UDP sockets
-    DEBUG            – Verbosity 0=errors 1=warn 2=info 3=debug (default: 0)
+    DEBUG            – If >= 3, print extra debug.  Errors, warnings, and
+                       operational INFO (including EchoLink directory status)
+                       are always printed (default: 0)
 */
 class EchoClient : public ReflectorClient
 {

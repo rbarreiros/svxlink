@@ -96,6 +96,10 @@ EL_DESCRIPTION=You have connected to a SvxLink EchoClient node.\n\nCheck out htt
 
 # EchoLink directory server(s), space-separated (default: servers.echolink.org)
 #EL_SERVERS=servers.echolink.org
+#
+# If logs show registration OK but you do not see your own -L node in a local
+# station list, that is common: the bulk list often omits yourself. Check the
+# Links tab on https://www.echolink.org/ or from another ham's EchoLink client.
 
 ###############################################################################
 # EchoLink connection control
@@ -168,5 +172,6 @@ MAX_QSOS=1
 # Debugging
 ###############################################################################
 
-# Verbosity level: 0=errors only, 1=warnings, 2=info, 3=debug (default: 0)
+# Extra verbosity: set to 3 for noisy debug.  Errors, warnings, and normal
+# INFO (reflector + EchoLink directory status, QSOs, etc.) always go to stdout.
 #DEBUG=0

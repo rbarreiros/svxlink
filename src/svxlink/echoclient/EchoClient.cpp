@@ -238,6 +238,12 @@ bool EchoClient::initialize(Async::Config& cfg, const std::string& section)
       sigc::mem_fun(*this, &EchoClient::onELStationListUpdated));
   m_dir->error.connect(
       sigc::mem_fun(*this, &EchoClient::onELError));
+  {
+    const string dir_target = proxy_server.empty()
+        ? servers[0] : (proxy_server + " (EchoLink proxy)");
+    log(LOGINFO, m_section + ": Registering with EchoLink directory via "
+        + dir_target + " (registration result follows)");
+  }
   m_dir->makeOnline();
 
     // -- EchoLink dispatcher (listens on UDP ports) ---------------------------
@@ -399,7 +405,22 @@ Json::Value EchoClient::buildNodeInfo(void) const
 
 void EchoClient::onELStatusChanged(StationData::Status status)
 {
-  log(LOGINFO, "EchoLink directory status: " + StationData::statusStr(status));
+    // EchoLink StationData uses short strings: ON=ONLINE, OFF=OFFLINE, BUSY=busy
+  if (status == StationData::STAT_ONLINE)
+  {
+    log(LOGINFO, m_section + ": EchoLink directory: registration OK — "
+                  "logged in as " + m_dir->callsign()
+                  + " (EchoLink reports status \"ON\" for online)");
+  }
+  else if (status == StationData::STAT_BUSY)
+  {
+    log(LOGINFO, m_section + ": EchoLink directory: registration OK — BUSY");
+  }
+  else
+  {
+    log(LOGINFO, m_section + ": EchoLink directory status: "
+        + StationData::statusStr(status));
+  }
 
   if ((status == StationData::STAT_ONLINE) ||
       (status == StationData::STAT_BUSY))
@@ -419,6 +440,31 @@ void EchoClient::onELStatusChanged(StationData::Status status)
 
 void EchoClient::onELStationListUpdated(void)
 {
+    // Directory uses uppercase callsign; bulk list often omits your own node.
+  const StationData* self_stn = m_dir->findCall(m_dir->callsign());
+  if (self_stn != nullptr)
+  {
+    log(LOGINFO, m_section + ": EchoLink directory list includes this node: "
+        + self_stn->callsign() + " at " + self_stn->ip().toString()
+        + " (id " + to_string(self_stn->id()) + ")");
+  }
+  else if (m_dir->status() == StationData::STAT_ONLINE ||
+           m_dir->status() == StationData::STAT_BUSY)
+  {
+    log(LOGINFO, m_section + ": EchoLink directory list does not contain "
+        + m_dir->callsign()
+        + " — this is normal: many clients omit your own station from the "
+          "downloaded list. Others should still see you; confirm from another "
+          "callsign or https://www.echolink.org/ (Links tab for *-L). "
+          "UDP 5198-5199 must reach this host for stations to connect.");
+  }
+
+  if (!m_dir->message().empty())
+  {
+    log(LOGINFO, m_section + ": EchoLink directory server notice: "
+        + m_dir->message());
+  }
+
   if (m_pending_connect_id > 0)
   {
     const StationData* stn = m_dir->findStation(m_pending_connect_id);
@@ -961,7 +1007,8 @@ void EchoClient::teardownAudioPipeline(void)
 {
   if (m_dec != nullptr)
   {
-    m_dec->registerSink(nullptr, false);
+      // Disconnect from m_splitter; registerSink(0) hits assert in AudioSource.
+    m_dec->unregisterSink();
     delete m_dec;
     m_dec = nullptr;
   }
@@ -1148,7 +1195,15 @@ void EchoClient::cleanup(void)
 
 void EchoClient::log(int level, const std::string& msg) const
 {
-  if (m_debug >= level)
+    // ERROR / WARN / INFO always go to stdout so operators see reflector and
+    // EchoLink directory state without setting DEBUG.  DEBUG lines only if
+    // DEBUG>=3 (same idea as ParrotClient).
+  if (level < LOGDEBUG)
+  {
+    cout << msg << "\n";
+    return;
+  }
+  if (m_debug >= LOGDEBUG)
   {
     cout << msg << "\n";
   }
