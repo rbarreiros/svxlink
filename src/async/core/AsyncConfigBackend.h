@@ -9,7 +9,7 @@ can load configuration data from various sources like files, databases, etc.
 
 \verbatim
 Async - A library for programming event driven applications
-Copyright (C) 2004-2025 Tobias Blomberg / SM0SVX
+Copyright (C) 2004-2026 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute  it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -365,7 +365,7 @@ using ConfigBackendPtr = std::unique_ptr<ConfigBackend>;
  *
  * Example registration:
  * @code
- * static ConfigBackendSpecificFactory<MySQLConfigBackend> mysql_factory("mysql");
+ * static ConfigBackendSpecificFactory<MySQLConfigBackend> mysql_factory;
  * @endcode
  */
 using ConfigBackendFactory = Factory<ConfigBackend>;
@@ -377,7 +377,11 @@ using ConfigBackendFactory = Factory<ConfigBackend>;
  * Automatically registers the backend with the factory.
  */
 template<class T>
-using ConfigBackendSpecificFactory = SpecificFactory<ConfigBackend, T>;
+struct ConfigBackendSpecificFactory : public SpecificFactory<ConfigBackend, T>
+{
+  ConfigBackendSpecificFactory(void)
+    : SpecificFactory<ConfigBackend, T>(T::OBJNAME) {}
+};
 
 /****************************************************************************
  *

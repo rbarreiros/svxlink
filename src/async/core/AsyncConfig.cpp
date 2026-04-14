@@ -397,7 +397,7 @@ ConfigBackendPtr Config::createAndConfigureBackend(const DbConf& conf,
   {
     cerr << "*** ERROR: Backend '" << conf.type
          << "' is not available (not compiled in)" << endl;
-    cerr << "Available backends: " << ConfigSource::availableBackendsString() << endl;
+    cerr << "Available backends: " << ConfigBackendFactory::validFactories() << endl;
     return nullptr;
   }
 

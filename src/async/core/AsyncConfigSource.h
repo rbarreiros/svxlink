@@ -37,7 +37,6 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #define ASYNC_CONFIG_SOURCE_INCLUDED
 
 #include <string>
-#include <vector>
 #include <optional>
 
 namespace Async
@@ -108,18 +107,6 @@ public:
    * @return true if the backend is available
    */
   static bool isBackendAvailable(BackendType type);
-
-  /**
-   * @brief Get list of available backend names
-   * @return Vector of backend names (e.g., ["file", "sqlite", "mysql"])
-   */
-  static std::vector<std::string> availableBackends();
-
-  /**
-   * @brief Get comma-separated string of available backends
-   * @return String like "file, sqlite, mysql"
-   */
-  static std::string availableBackendsString();
 
   /**
    * @brief Check if this source is valid

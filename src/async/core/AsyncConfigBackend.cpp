@@ -253,24 +253,22 @@ ConfigBackendPtr createConfigBackend(const std::string& url)
 ConfigBackendPtr createConfigBackendByType(const std::string& backend_type,
                                           const std::string& connection_info)
 {
-  ConfigBackend* backend = ConfigBackendFactory::createNamedObject(backend_type);
+  ConfigBackendPtr backend(ConfigBackendFactory::createNamedObject(backend_type));
   if (!backend)
   {
     std::cerr << "*** ERROR: Failed to create backend of type '" << backend_type 
-              << "'. Available: " << ConfigSource::availableBackendsString() << std::endl;
+              << "'. Available: " << ConfigBackendFactory::validFactories() << std::endl;
     return nullptr;
   }
   
-  // Open the backend with the connection info
   if (!backend->open(connection_info))
   {
     std::cerr << "*** ERROR: Failed to open backend of type '" << backend_type 
               << "' with connection info: " << connection_info << std::endl;
-    delete backend;
     return nullptr;
   }
   
-  return ConfigBackendPtr(backend);
+  return backend;
 }
 
 } // namespace Async

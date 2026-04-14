@@ -150,7 +150,7 @@ int main(int argc, char **argv)
 void showAvailableBackends()
 {
   cout << "Available configuration backends: " 
-       << ConfigSource::availableBackendsString() << endl << endl;
+       << ConfigBackendFactory::validFactories() << endl << endl;
 
   // Show detailed availability
   cout << "Backend availability:" << endl;

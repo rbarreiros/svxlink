@@ -77,7 +77,7 @@ using namespace Async;
  ****************************************************************************/
 
 // Factory registration for file backend
-static ConfigBackendSpecificFactory<FileConfigBackend> file_factory("file");
+static ConfigBackendSpecificFactory<FileConfigBackend> file_factory;
 
 /****************************************************************************
  *

@@ -24,6 +24,7 @@ GNU General Public License for more details.
 */
 
 #include "AsyncConfigSource.h"
+#include "AsyncConfigBackend.h"
 #include <iostream>
 #include <sstream>
 #include <algorithm>
@@ -46,7 +47,7 @@ std::optional<ConfigSource> ConfigSource::parse(const std::string& url)
   if (source.backend_type == BACKEND_UNKNOWN)
   {
     std::cerr << "*** ERROR: Unknown backend type in URL: " << url << std::endl;
-    std::cerr << "*** Available backends: " << availableBackendsString() << std::endl;
+    std::cerr << "*** Available backends: " << ConfigBackendFactory::validFactories() << std::endl;
     return std::nullopt;
   }
 
@@ -54,7 +55,7 @@ std::optional<ConfigSource> ConfigSource::parse(const std::string& url)
   if (!isBackendAvailable(source.backend_type))
   {
     std::cerr << "*** ERROR: Backend '" << source.backend_type_name
-              << "' not compiled in. Available: " << availableBackendsString() << std::endl;
+              << "' not compiled in. Available: " << ConfigBackendFactory::validFactories() << std::endl;
     return std::nullopt;
   }
 
@@ -236,34 +237,6 @@ bool ConfigSource::isBackendAvailable(const std::string& backend_type_name)
 bool ConfigSource::isBackendAvailable(BackendType type)
 {
   return isBackendAvailable(getBackendTypeName(type));
-}
-
-std::vector<std::string> ConfigSource::availableBackends()
-{
-  std::vector<std::string> backends;
-  backends.push_back("file");
-#ifdef HAS_SQLITE_SUPPORT
-  backends.push_back("sqlite");
-#endif
-#ifdef HAS_MYSQL_SUPPORT
-  backends.push_back("mysql");
-#endif
-#ifdef HAS_POSTGRESQL_SUPPORT
-  backends.push_back("postgresql");
-#endif
-  return backends;
-}
-
-std::string ConfigSource::availableBackendsString()
-{
-  auto backends = availableBackends();
-  std::string result;
-  for (size_t i = 0; i < backends.size(); ++i)
-  {
-    if (i > 0) result += ", ";
-    result += backends[i];
-  }
-  return result;
 }
 
 } // namespace Async

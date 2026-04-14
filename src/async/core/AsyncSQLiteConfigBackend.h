@@ -117,6 +117,8 @@ CREATE TABLE config (
 class SQLiteConfigBackend : public ConfigBackend
 {
   public:
+    static constexpr const char* OBJNAME = "sqlite";
+
     /**
      * @brief 	Default constructor
      */

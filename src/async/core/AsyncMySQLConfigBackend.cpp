@@ -73,7 +73,7 @@ using namespace Async;
 
 #ifdef HAS_MYSQL_SUPPORT
 // Factory registration for MySQL backend
-static ConfigBackendSpecificFactory<MySQLConfigBackend> mysql_factory("mysql");
+static ConfigBackendSpecificFactory<MySQLConfigBackend> mysql_factory;
 #endif
 
 /****************************************************************************

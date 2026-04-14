@@ -120,6 +120,8 @@ CREATE TABLE config (
 class MySQLConfigBackend : public ConfigBackend
 {
   public:
+    static constexpr const char* OBJNAME = "mysql";
+
     /**
      * @brief 	Default constructor
      */

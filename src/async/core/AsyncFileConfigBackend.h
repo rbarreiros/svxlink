@@ -106,6 +106,8 @@ AsyncConfig class but through the ConfigBackend interface.
 class FileConfigBackend : public ConfigBackend
 {
   public:
+    static constexpr const char* OBJNAME = "file";
+
     /**
      * @brief 	Default constructor
      */

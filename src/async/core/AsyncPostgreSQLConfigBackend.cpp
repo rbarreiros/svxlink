@@ -73,7 +73,7 @@ using namespace Async;
 
 #ifdef HAS_POSTGRESQL_SUPPORT
 // Factory registration for PostgreSQL backend
-static ConfigBackendSpecificFactory<PostgreSQLConfigBackend> postgresql_factory("postgresql");
+static ConfigBackendSpecificFactory<PostgreSQLConfigBackend> postgresql_factory;
 #endif
 
 /****************************************************************************

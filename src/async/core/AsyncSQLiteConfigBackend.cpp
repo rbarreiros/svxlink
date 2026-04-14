@@ -73,7 +73,7 @@ using namespace Async;
 
 #ifdef HAS_SQLITE_SUPPORT
 // Factory registration for SQLite backend
-static ConfigBackendSpecificFactory<SQLiteConfigBackend> sqlite_factory("sqlite");
+static ConfigBackendSpecificFactory<SQLiteConfigBackend> sqlite_factory;
 #endif
 
 /****************************************************************************

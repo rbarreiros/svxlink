@@ -121,6 +121,8 @@ CREATE TABLE config (
 class PostgreSQLConfigBackend : public ConfigBackend
 {
   public:
+    static constexpr const char* OBJNAME = "postgresql";
+
     /**
      * @brief 	Default constructor
      */
