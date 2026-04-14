@@ -5,7 +5,7 @@
 
 \verbatim
 SvxLink - A Multi Purpose Voice Services System for Ham Radio Use
-Copyright (C) 2003-2026
+Copyright (C) 2003-2026 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -75,7 +75,6 @@ using namespace Async;
 #define LOGDEBUG  3
 
 // multirate FIR coefficients reused from svxlink trx
-// (included via the reflectorclient build target's include path)
 #include "../trx/multirate_filter_coeff.h"
 
 
@@ -231,6 +230,7 @@ void UsrpClient::onTalkerStart(uint32_t tg, const std::string& callsign)
 {
   log(LOGINFO, m_section + ": Talker start on TG #" + to_string(tg)
       + ": " + callsign);
+
     // Send a USRP meta frame announcing the remote callsign
   sendUsrpMeta(callsign);
 } /* UsrpClient::onTalkerStart */
@@ -240,6 +240,7 @@ void UsrpClient::onTalkerStop(uint32_t tg, const std::string& callsign)
 {
   log(LOGINFO, m_section + ": Talker stop on TG #" + to_string(tg)
       + ": " + callsign);
+
     // Flush remaining buffered audio toward USRP
   if (m_dec != nullptr)
   {
@@ -449,6 +450,7 @@ void UsrpClient::sendUsrpStop(void)
   UsrpHeaderMsg hdr;
   if (m_udp_seq++ > 0x7fff) m_udp_seq = 0;
   hdr.setSeq(m_udp_seq);
+  
     // keyup = 0, type = USRP_TYPE_VOICE (all zero defaults) → PTT-off
 
   ostringstream ss;

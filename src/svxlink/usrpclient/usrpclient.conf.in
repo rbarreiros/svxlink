@@ -3,7 +3,6 @@
 # UsrpClient configuration file
 #
 # Standalone bridge between an SvxReflector and a USRP endpoint.
-# (Analog Bridge, AllStar, MMDVM_Bridge, DVSwitch, etc.)
 #
 # Run: usrpclient --config /etc/svxlink/usrpclient.conf
 #
@@ -16,7 +15,7 @@
 [UsrpClient]
 
 ###############################################################################
-# Reflector connection settings (shared with ReflectorLogic)
+# Reflector connection settings
 ###############################################################################
 
 # Your station callsign (required)
@@ -41,7 +40,7 @@ HOSTS=reflector.example.org
 #VERBOSE=1
 
 ###############################################################################
-# Certificate / PKI settings (same as ReflectorLogic)
+# Certificate / PKI settings
 ###############################################################################
 
 # Directory where PKI files (key, csr, crt, CA bundle) are stored
@@ -68,13 +67,12 @@ HOSTS=reflector.example.org
 ###############################################################################
 
 # Hostname or IP address of the USRP peer (required)
-# (Analog Bridge, AllStarLink, MMDVM_Bridge, DVSwitch, etc.)
 USRP_HOST=127.0.0.1
 
-# UDP port to send audio *to* the USRP peer (Analog Bridge rx_port)
+# UDP port to send audio *to* the USRP peer
 USRP_TX_PORT=41234
 
-# UDP port to *receive* audio from the USRP peer (Analog Bridge tx_port)
+# UDP port to *receive* audio from the USRP peer
 USRP_RX_PORT=41233
 
 ###############################################################################
