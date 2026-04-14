@@ -159,12 +159,7 @@ bool SimplexLogic::initialize(Async::Config& cfgobj, const string& logic_name)
   
   processEvent("startup");
   
-  // TODO -- Rui Barreiros
-  // Add a callback to update the TCL functions that use config values when they are updated 
-
-
   return true;
-  
 } /* SimplexLogic::initialize */
 
 

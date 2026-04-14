@@ -1,7 +1,7 @@
 /**
 @file	 AsyncPostgreSQLConfigBackend.h
 @brief   PostgreSQL-based configuration backend implementation
-@author  Rui Barreiros
+@author  Rui Barreiros / CR7BPM
 @date	 2025-09-19
 
 This file contains the PostgreSQL-based configuration backend that stores
@@ -9,7 +9,7 @@ configuration data in a PostgreSQL database.
 
 \verbatim
 Async - A library for programming event driven applications
-Copyright (C) 2004-2025 Tobias Blomberg / SM0SVX
+Copyright (C) 2004-2026 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -97,7 +97,7 @@ namespace Async
 
 /**
 @brief	PostgreSQL-based configuration backend
-@author Assistant
+@author Rui Barreiros / CR7BPM
 @date   2025-09-19
 
 This class implements a configuration backend that stores configuration

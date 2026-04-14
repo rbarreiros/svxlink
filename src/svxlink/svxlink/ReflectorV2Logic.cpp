@@ -1915,12 +1915,12 @@ void ReflectorLogic::cfgUpdated(const std::string& section, const std::string& t
     // Runtime-updatable boolean values
     if (tag == "MUTE_FIRST_TX_LOC")
     {
-      // TODO -- Rui Barreiros 
+      // TODO -- TO BE IMPLEMENTED
       cfg().getValue(name(), "MUTE_FIRST_TX_LOC", m_mute_first_tx_loc);
     }
     else if (tag == "MUTE_FIRST_TX_REM")
     {
-      // TODO -- Rui Barreiros 
+      // TODO -- TO BE IMPLEMENTED
       cfg().getValue(name(), "MUTE_FIRST_TX_REM", m_mute_first_tx_rem);
     }
     else if (tag == "VERBOSE")
@@ -1984,7 +1984,7 @@ void ReflectorLogic::cfgUpdated(const std::string& section, const std::string& t
       m_qsy_pending_timer.setTimeout(
         (qsy_pending_timeout > 0) ? (1000 * qsy_pending_timeout) : -1);
     }
-    // Anything else requires a restart.....
+    // Note: Anything else requires a restart.....
   }
 } /* ReflectorLogic::cfgUpdated */
 

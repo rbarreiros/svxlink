@@ -784,16 +784,16 @@ void RepeaterLogic::cfgUpdated(const std::string& section, const std::string& ta
     }
     else if (tag == "OPEN_ON_1750")
     {
-      // TODO -- Rui Barreiros
+      // TODO -- TO BE IMPLEMENTED
       // Need to figure out how to change the already implemented tone detectors
     }
     else if (tag == "OPEN_ON_CTCSS")
     {
-      // TODO -- Rui Barreiros
+      // TODO -- TO BE IMPLEMENTED
       // Need to save the signal connection object from the 
       // open_on_ctcss_timer.expired and check if it exists,
       // and if it doesn't, add it. If it exists and it's not
-      // supposed, disconnect it.
+      // supposed to exist anymore, disconnect it.
     }
     else if(tag == "OPEN_ON_SQL")
     {

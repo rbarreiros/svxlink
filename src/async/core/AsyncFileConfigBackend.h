@@ -1,7 +1,7 @@
 /**
 @file	 AsyncFileConfigBackend.h
 @brief   File-based configuration backend implementation
-@author  Tobias Blomberg / Rui Barreiros
+@author  Tobias Blomberg / SM0SVX, Rui Barreiros / CR7BPM
 @date	 2025-09-19
 
 This file contains the file-based configuration backend that reads INI-formatted
@@ -9,7 +9,7 @@ configuration files, similar to the original AsyncConfig implementation.
 
 \verbatim
 Async - A library for programming event driven applications
-Copyright (C) 2004-2025 Tobias Blomberg / SM0SVX
+Copyright (C) 2004-2026 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -96,12 +96,13 @@ namespace Async
 
 /**
 @brief	File-based configuration backend
-@author Assistant
+@author Tobias Blomberg / SM0SVX
 @date   2025-09-19
 
 This class implements a configuration backend that reads INI-formatted
 configuration files. It provides the same functionality as the original
 AsyncConfig class but through the ConfigBackend interface.
+
 */
 class FileConfigBackend : public ConfigBackend
 {

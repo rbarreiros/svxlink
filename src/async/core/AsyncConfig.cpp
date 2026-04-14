@@ -618,7 +618,7 @@ std::string Config::getBackendType(void) const
 bool Config::getValue(const std::string& section, const std::string& tag,
                       std::string& value, bool missing_ok) const
 {
-  // First try to get from in-memory cache (for subscriptions)
+  // First try to get from in-memory (for subscriptions)
   Sections::const_iterator sec_it = m_sections.find(section);
   if (sec_it != m_sections.end())
   {
@@ -630,7 +630,7 @@ bool Config::getValue(const std::string& section, const std::string& tag,
     }
   }
 
-  // If not in cache, try to get from backend
+  // If not in memory, try to get from backend
   if (m_backend != nullptr && m_backend->isOpen())
   {
     if (m_backend->getValue(section, tag, value))
@@ -719,7 +719,7 @@ list<string> Config::listSection(const string& section)
 void Config::setValue(const std::string& section, const std::string& tag,
                       const std::string& value)
 {
-  // Update in-memory cache
+  // Update in-memory 
   Values &values = m_sections[section];
   bool value_changed = (value != values[tag].val);
   
@@ -778,7 +778,7 @@ void Config::loadFromBackend(void)
     return;
   }
 
-  // Load all sections and their tags/values into memory cache
+  // Load all sections and their tags/values into memory
   list<string> sections = m_backend->listSections();
   for (const string& section : sections)
   {
@@ -801,7 +801,7 @@ void Config::syncToBackend(const std::string& section, const std::string& tag)
     return;
   }
 
-  // Get the value from in-memory cache
+  // Get the value from in-memory
   Sections::const_iterator sec_it = m_sections.find(section);
   if (sec_it != m_sections.end())
   {
@@ -845,7 +845,7 @@ void Config::reload(void)
       std::string new_value;
       if (m_backend->getValue(section, tag, new_value))
       {
-        // Update cache; auto-creates entry for newly-seen sections/tags
+        // Update memory; auto-creates entry for newly-seen sections/tags
         auto& cached = m_sections[section][tag];
         if (cached.val != new_value)
         {
@@ -868,7 +868,7 @@ void Config::onBackendValueChanged(const std::string& section,
   //std::cout << "[DEBUG Config] onBackendValueChanged called: [" << section << "]" << tag 
   //          << " = '" << value << "'" << std::endl;
 
-  // Update in-memory cache
+  // Update in-memory
   m_sections[section][tag].val = value;
 
   // Trigger subscriptions
@@ -887,12 +887,12 @@ void Config::onBackendValueChanged(const std::string& section,
     }
     else
     {
-      //std::cout << "[DEBUG Config] Tag not found in cache: [" << section << "]" << tag << std::endl;
+      //std::cout << "[DEBUG Config] Tag not found in memory: [" << section << "]" << tag << std::endl;
     }
   }
   else
   {
-    //std::cout << "[DEBUG Config] Section not found in cache: [" << section << "]" << std::endl;
+    //std::cout << "[DEBUG Config] Section not found in memory: [" << section << "]" << std::endl;
   }
 
   // Emit valueUpdated signal

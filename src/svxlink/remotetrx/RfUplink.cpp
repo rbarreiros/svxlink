@@ -421,7 +421,7 @@ void RfUplink::cfgUpdated(const std::string& section, const std::string& tag, co
       loop_rx_to_tx = atoi(value.c_str()) != 0;
 
       // Not really sure how I'm going to handle this yet...
-      // TODO -- Rui Barreiros
+      // TODO -- TO BE IMPLEMENTED
       if(loop_rx_to_tx)
       {
 
@@ -444,32 +444,12 @@ void RfUplink::cfgUpdated(const std::string& section, const std::string& tag, co
 
       // Yeah, well, how to remove the already added tone detectors and
       // add the new ones?
-      // TODO -- Rui Barreiros
-
-      /*
-      for (std::vector<CtcssDetPar>::const_iterator it=ctcss_det_par.begin();
-           it != ctcss_det_par.end(); ++it)
-      {
-        if (((*it).fq > 0) && ((*it).duration > 0))
-        {
-          rx->addToneDetector((*it).fq, 4, 10, (*it).duration);
-        }
-      }
-      */    
+      // TODO -- TO BE IMPLEMENTED
     }
     else if (tag == "DETECT_1750")
     {
       // Yeah, and another one .......
-      // TODO -- Rui Barreiros
-      /*
-      unsigned det_1750_duration = 0;
-      cfg.getValue(name, "DETECT_1750", det_1750_duration);
-
-      if (det_1750_duration > 0)
-      {
-        rx->addToneDetector(1750, 50, 10, det_1750_duration);
-      }
-      */
+      // TODO -- TO BE IMPLEMENTED
     }
   }
 } /* RfUplink::cfgUpdated */

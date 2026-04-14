@@ -1,14 +1,14 @@
 /**
 @file	 AsyncMySQLConfigBackend.cpp
 @brief   MySQL/MariaDB-based configuration backend implementation
-@author  Rui Barreiros
+@author  Rui Barreiros / CR7BPM
 @date	 2025-09-19
 
 This file contains the implementation of the MySQL/MariaDB-based configuration backend.
 
 \verbatim
 Async - A library for programming event driven applications
-Copyright (C) 2004-2025 Tobias Blomberg / SM0SVX
+Copyright (C) 2004-2026 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -359,9 +359,6 @@ bool MySQLConfigBackend::initializeTables(void)
     return false;
   }
   
-  // Note: initializeLastCheckTime() is now called from finalizeInitialization()
-  // after tables are populated, not here when tables are empty
-  
   return true;
 } /* MySQLConfigBackend::initializeTables */
 
@@ -373,9 +370,6 @@ bool MySQLConfigBackend::finalizeInitialization(void)
     return false;
   }
   
-  // Initialize m_last_check_time to the most recent updated_at in the database
-  // This prevents detecting all existing records as "changes" on first poll
-  // This must be called AFTER tables are populated with data
   initializeLastCheckTime();
   
   return true;

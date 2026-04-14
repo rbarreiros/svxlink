@@ -915,7 +915,7 @@ class Config
     };
 
     ConfigBackendPtr m_backend;
-    Sections         m_sections;       // In-memory cache for subscriptions
+    Sections         m_sections;       // In-memory for subscriptions
     std::string      m_main_config_file; // Path to main config file (for CFG_DIR resolution)
     std::string      m_last_error;     // Last error from a failed open call
 

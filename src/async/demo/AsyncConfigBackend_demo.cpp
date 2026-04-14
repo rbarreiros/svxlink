@@ -1,7 +1,7 @@
 /**
 @file	 AsyncConfigBackend_demo.cpp
 @brief   Demo program showing the new configuration backend system
-@author  Assistant
+@author  Rui Barreiros / CR7BPM
 @date	 2025-09-19
 
 This program demonstrates how to use the new configuration backend abstraction
@@ -9,7 +9,7 @@ layer to load configuration from different sources.
 
 \verbatim
 Async - A library for programming event driven applications
-Copyright (C) 2004-2025 Tobias Blomberg / SM0SVX
+Copyright (C) 2004-2026 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by

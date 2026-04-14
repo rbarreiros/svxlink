@@ -46,38 +46,38 @@ ConfigBackend::ConfigBackend(bool enable_notifications, unsigned int auto_poll_i
     m_poll_running(false)
 {
   m_wakeup_pipe[0] = m_wakeup_pipe[1] = -1;
-}
+} /* ConfigBackend::ConfigBackend */
 
 ConfigBackend::~ConfigBackend(void)
 {
   stopAutoPolling();
-}
+} /* ConfigBackend::~ConfigBackend */
 
 void ConfigBackend::setTablePrefix(const std::string& prefix)
 {
   m_table_prefix = prefix;
-}
+} /* ConfigBackend::setTablePrefix */
 
 std::string ConfigBackend::getFullTableName(const std::string& base_name) const
 {
   return m_table_prefix + base_name;
-}
+} /* ConfigBackend::getFullTableName */
 
 void ConfigBackend::enableChangeNotifications(bool enable)
 {
   m_enable_change_notifications = enable;
-}
+} /* ConfigBackend::enableChangeNotifications */
 
 bool ConfigBackend::changeNotificationsEnabled(void) const
 {
   return m_enable_change_notifications;
-}
+} /* ConfigBackend::changeNotificationsEnabled */
 
 bool ConfigBackend::checkForExternalChanges(void)
 {
   // Database backends should override this
   return false;
-}
+} /* ConfigBackend::checkForExternalChanges */
 
 void ConfigBackend::startAutoPolling(unsigned int interval_ms)
 {
@@ -108,7 +108,7 @@ void ConfigBackend::startAutoPolling(unsigned int interval_ms)
   m_current_poll_interval = interval_ms;
   m_poll_running = true;
   m_poll_thread = std::thread(&ConfigBackend::pollThreadFunc, this, interval_ms);
-}
+} /* ConfigBackend::startAutoPolling */
 
 void ConfigBackend::stopAutoPolling(void)
 {
@@ -147,17 +147,17 @@ void ConfigBackend::stopAutoPolling(void)
 
   m_current_poll_interval = 0;
   std::cout << "Stopped async config polling" << std::endl;
-}
+} /* ConfigBackend::stopAutoPolling */
 
 bool ConfigBackend::isAutoPolling(void) const
 {
   return m_poll_running.load();
-}
+} /* ConfigBackend::isAutoPolling */
 
 unsigned int ConfigBackend::getPollingInterval(void) const
 {
   return m_current_poll_interval;
-}
+} /* ConfigBackend::getPollingInterval */
 
 void ConfigBackend::pollThreadFunc(unsigned int interval_ms)
 {
@@ -179,7 +179,7 @@ void ConfigBackend::pollThreadFunc(unsigned int interval_ms)
       lock.lock();
     }
   }
-}
+} /* ConfigBackend::pollThreadFunc */
 
 void ConfigBackend::onWakeupPipe(Async::FdWatch*)
 {
@@ -201,7 +201,7 @@ void ConfigBackend::onWakeupPipe(Async::FdWatch*)
     valueChanged(section, tag, value);
     batch.pop();
   }
-}
+} /* ConfigBackend::onWakeupPipe */
 
 void ConfigBackend::notifyValueChanged(const std::string& section,
                                       const std::string& tag,
@@ -234,7 +234,7 @@ void ConfigBackend::notifyValueChanged(const std::string& section,
     // No polling thread active: emit directly on the calling (event-loop) thread
     valueChanged(section, tag, value);
   }
-}
+} /* ConfigBackend::notifyValueChanged */
 
 // Factory convenience functions
 
@@ -248,7 +248,7 @@ ConfigBackendPtr createConfigBackend(const std::string& url)
   }
 
   return createConfigBackendByType(parsed->backend_type_name, parsed->connection_info);
-}
+} /* createConfigBackend */
 
 ConfigBackendPtr createConfigBackendByType(const std::string& backend_type,
                                           const std::string& connection_info)
@@ -269,7 +269,7 @@ ConfigBackendPtr createConfigBackendByType(const std::string& backend_type,
   }
   
   return backend;
-}
+} /* createConfigBackendByType */
 
-} // namespace Async
+} /* namespace Async */
 

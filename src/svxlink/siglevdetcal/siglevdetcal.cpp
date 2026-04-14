@@ -354,7 +354,6 @@ int main(int argc, char **argv)
   }
   else if (pos_count == 2 && cli_config.empty() && cli_dbconfig.empty())
   {
-    // Legacy: <config-file-or-db.conf> <section>
     const string legacy_cfg(argv[argi]);
     rx_name = argv[argi + 1];
     if (legacy_cfg.find("db.conf") != string::npos)

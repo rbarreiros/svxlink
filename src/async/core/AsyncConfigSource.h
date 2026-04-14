@@ -15,7 +15,7 @@ Supports:
 
 \verbatim
 Async - A library for programming event driven applications
-Copyright (C) 2004-2025 Tobias Blomberg / SM0SVX
+Copyright (C) 2004-2026 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -139,7 +139,7 @@ private:
                                std::string& connection_string);
 };
 
-} // namespace Async
+} /* namespace Async */
 
-#endif // ASYNC_CONFIG_SOURCE_INCLUDED
+#endif /* ASYNC_CONFIG_SOURCE_INCLUDED */
 

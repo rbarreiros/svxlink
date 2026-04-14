@@ -9,7 +9,7 @@ parse configuration source URLs and detect the backend type.
 
 \verbatim
 Async - A library for programming event driven applications
-Copyright (C) 2004-2025 Tobias Blomberg / SM0SVX
+Copyright (C) 2004-2026 Tobias Blomberg / SM0SVX
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -83,7 +83,7 @@ std::optional<ConfigSource> ConfigSource::parse(const std::string& url)
   }
 
   return source;
-}
+} /* ConfigSource::parse */
 
 ConfigSource::BackendType ConfigSource::detectBackendType(const std::string& url)
 {
@@ -110,7 +110,7 @@ ConfigSource::BackendType ConfigSource::detectBackendType(const std::string& url
   }
 
   return BACKEND_UNKNOWN;
-}
+} /* ConfigSource::detectBackendType */
 
 std::string ConfigSource::getBackendTypeName(BackendType type)
 {
@@ -123,7 +123,7 @@ std::string ConfigSource::getBackendTypeName(BackendType type)
     case BACKEND_UNKNOWN:    return "unknown";
     default:                 return "unknown";
   }
-}
+} /* ConfigSource::getBackendTypeName */
 
 bool ConfigSource::parseDatabaseURL(const std::string& url,
                                     std::string& connection_string)
@@ -205,7 +205,7 @@ bool ConfigSource::parseDatabaseURL(const std::string& url,
 
   connection_string = oss.str();
   return true;
-}
+} /* ConfigSource::parseDatabaseURL */
 
 bool ConfigSource::isBackendAvailable(const std::string& backend_type_name)
 {
@@ -232,12 +232,12 @@ bool ConfigSource::isBackendAvailable(const std::string& backend_type_name)
   }
 #endif
   return false;
-}
+} /* ConfigSource::isBackendAvailable */
 
 bool ConfigSource::isBackendAvailable(BackendType type)
 {
   return isBackendAvailable(getBackendTypeName(type));
-}
+} /* ConfigSource::isBackendAvailable */
 
-} // namespace Async
+} /* namespace */
 
