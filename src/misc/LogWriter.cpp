@@ -197,7 +197,7 @@ void LogWriter::stop(void)
   if (m_pipefd[1] != -1)
   {
     ssize_t ret= write(m_pipefd[1], "\0", 1);
-    void(ret); // Suppress compiler warning about unused result
+    (void)ret; // Suppress compiler warning about unused result
 
     close(m_pipefd[1]);
     m_pipefd[1] = -1;
