@@ -33,7 +33,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <iostream>
 #include <cstdlib>
 #include <map>
-
+#include <string.h>
 
 /****************************************************************************
  *
@@ -321,40 +321,72 @@ int main(int argc, char **argv)
           "terms and conditions in\n";
   cout << "the GNU GPL (General Public License) version 2 or later.\n\n";
 
-  if (argc < 3)
+  // Argument parsing:
+  //   siglevdetcal [--config <file>] [--dbconfig <file>] <section>
+  //   siglevdetcal <config-file-or-db.conf> <section>      (legacy)
+  string cli_config;
+  string cli_dbconfig;
+  string rx_name;
+
+  int argi = 1;
+  while (argi < argc)
   {
-    cerr << "Usage: siglevdetcal <config file or db.conf> <receiver section>\n";
-    cerr << "  <config file or db.conf> can be:\n";
-    cerr << "    - Path to a regular configuration file (e.g., /etc/svxlink/svxlink.conf)\n";
-    cerr << "    - Path to a db.conf file (e.g., /etc/svxlink/db.conf)\n";
-    exit(1);
+    if (strcmp(argv[argi], "--config") == 0 && argi + 1 < argc)
+    {
+      cli_config = argv[++argi];
+    }
+    else if (strcmp(argv[argi], "--dbconfig") == 0 && argi + 1 < argc)
+    {
+      cli_dbconfig = argv[++argi];
+    }
+    else
+    {
+      break;
+    }
+    ++argi;
   }
-  string cfg_file(argv[1]);
-  string rx_name(argv[2]);
-  
-  // Auto-detect if this is a db.conf file or regular config file
-  bool is_dbconf = (cfg_file.find("db.conf") != string::npos);
-  
-  bool config_loaded = false;
-  if (is_dbconf)
+
+  // Remaining positional arguments
+  int pos_count = argc - argi;
+  if (pos_count == 1)
   {
-    cout << "Detected db.conf file, loading database configuration..." << endl;
-    config_loaded = cfg.openFromDbConfig(cfg_file);
+    rx_name = argv[argi];
+  }
+  else if (pos_count == 2 && cli_config.empty() && cli_dbconfig.empty())
+  {
+    // Legacy: <config-file-or-db.conf> <section>
+    const string legacy_cfg(argv[argi]);
+    rx_name = argv[argi + 1];
+    if (legacy_cfg.find("db.conf") != string::npos)
+      cli_dbconfig = legacy_cfg;
+    else
+      cli_config = legacy_cfg;
   }
   else
   {
-    cout << "Loading file-based configuration..." << endl;
-    config_loaded = cfg.openDirect("file://" + cfg_file);
-  }
-  
-  if (!config_loaded)
-  {
-    cerr << "*** ERROR: Could not open configuration from \"" << cfg_file << "\"\n";
+    cerr << "Usage: " << argv[0]
+         << " [--config <file>] [--dbconfig <file>] <receiver section>\n"
+         << "       " << argv[0]
+         << " <config file or db.conf> <receiver section>  (legacy)\n\n"
+         << "If no --config / --dbconfig option is given, the standard\n"
+         << "locations are searched for db.conf and then svxlink.conf.\n";
     exit(1);
   }
-  
-  cout << "Configuration loaded from " << cfg_file 
-       << " using " << cfg.getBackendType() << " backend" << endl;
+
+  if (rx_name.empty())
+  {
+    cerr << "*** ERROR: No receiver section specified\n";
+    exit(1);
+  }
+
+  if (!cfg.openWithFallback(cli_config, cli_dbconfig, "svxlink.conf"))
+  {
+    cerr << "*** ERROR: " << cfg.getLastError() << "\n";
+    exit(1);
+  }
+
+  cout << "Configuration loaded from: " << cfg.getMainConfigFile()
+       << " (" << cfg.getBackendType() << " backend)" << endl;
   
   string value;
   if (cfg.getValue("GLOBAL", "CARD_SAMPLE_RATE", value))

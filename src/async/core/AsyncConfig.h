@@ -73,8 +73,6 @@ An example of how to use the Config class
  ****************************************************************************/
 
 #include "AsyncConfigBackend.h"
-#include "AsyncConfigManager.h"
-
 
 
 /****************************************************************************
@@ -162,24 +160,17 @@ class Config
     ~Config(void);
   
     /**
-     * @brief 	Open configuration using db.conf for backend selection
-     * @param 	config_dir Optional configuration directory to search for db.conf
-     * @return	Returns \em true on success or else \em false.
+     * @brief   Open configuration searching standard locations
+     * @param   default_config_name Config filename to search for (default: "svxlink.conf")
+     * @return  Returns \em true on success or else \em false.
      *
-     * This function reads db.conf to determine which configuration backend to use.
-     * It searches for db.conf in the following locations:
-     * 1. config_dir/db.conf (if config_dir is provided)
-     * 2. ~/.svxlink/db.conf
-     * 3. /etc/svxlink/db.conf
-     * 4. SVX_SYSCONF_INSTALL_DIR/db.conf
-     * 
-     * If no db.conf is found, defaults to file backend with svxlink.conf.
-     * The application will abort with an error if:
-     * - The specified backend is not available (not compiled in)
-     * - Database connection fails
-     * - Configuration cannot be loaded
+     * Convenience wrapper around openWithFallback() with empty CLI overrides.
+     * Searches standard locations for db.conf first, then for default_config_name.
+     * Use getLastError() for error details on failure.
+     *
+     * For direct file opening use openDirect("file:///path/to/file.conf") instead.
      */
-    bool open(const std::string& config_dir = "");
+    bool open(const std::string& default_config_name = "svxlink.conf");
 
     /**
      * @brief 	Open configuration using specific db.conf file
@@ -192,11 +183,11 @@ class Config
     bool openFromDbConfig(const std::string& db_conf_path);
 
     /**
-     * @brief 	Open configuration with explicit source (legacy method)
+     * @brief 	Open configuration with explicit source 
      * @param 	source The configuration source (file path, database URL, etc.)
      * @return	Returns \em true on success or else \em false.
      *
-     * This is the legacy method that directly opens a configuration source.
+     * This directly opens a configuration source.
      * For new applications, prefer the parameterless open() method that
      * uses db.conf for backend selection.
      */
@@ -239,46 +230,56 @@ class Config
     void reload(void);
 
     /**
-     * @brief Result structure for openWithFallback()
+     * @brief   Import configuration from an installed example config file
+     * @param   config_filename Filename to search for (e.g., "svxlink.conf")
+     * @return  \em true if the file was found and imported, \em false otherwise
+     *
+     * Searches the standard locations (~/.svxlink/, /etc/svxlink/,
+     * SVX_SYSCONF_INSTALL_DIR) for @a config_filename, opens it as a file
+     * backend, and copies every section/key/value (including any CFG_DIR
+     * sub-files) into the currently active backend.
+     *
+     * Intended as a one-time database initialisation helper. The caller
+     * should verify that the active backend is not a file backend and that
+     * it is empty before calling this method.
      */
-    struct ConfigLoadResult
-    {
-      bool success;                  ///< Whether config was successfully loaded
-      std::string source_type;       ///< "command_line", "dbconfig", "default", or "none"
-      std::string source_path;       ///< Path to the config file or db.conf
-      std::string backend_type;      ///< Backend type used (file/sqlite/mysql/postgresql)
-      std::string error_message;     ///< Error message if success == false
-      bool used_dbconfig;            ///< True if configuration came from db.conf
-    };
+    bool importFromConfigFile(const std::string& config_filename);
 
     /**
      * @brief   Smart configuration initialization with fallback
-     * @param   cmdline_config Path from --config option (empty if not provided)
-     * @param   cmdline_dbconfig Path from --dbconfig option (empty if not provided)
+     * @param   cmdline_config    Path from --config CLI option (empty if not given)
+     * @param   cmdline_dbconfig  Path from --dbconfig CLI option (empty if not given)
      * @param   default_config_name Default config filename (e.g., "svxlink.conf")
-     * @return  ConfigLoadResult with detailed information
+     * @return  \em true on success, \em false on failure
      *
-     * This method implements a complete configuration initialization cascade:
-     * 1. If --config provided: use openDirect() with that file
-     * 2. If --dbconfig provided: use openFromDbConfig() with that file
-     * 3. Search for db.conf in standard locations, use if found
-     * 4. Search for default_config_name in standard locations, use if found
-     * 5. Fail with detailed error information
+     * Implements the full configuration initialization cascade:
+     * 1. --config given  → openDirect() with that file
+     * 2. --dbconfig given → open backend described by that db.conf
+     * 3. Search standard locations for db.conf, use if found
+     * 4. Search standard locations for default_config_name, use if found
+     * 5. Fail — call getLastError() for details
      *
-     * Example usage:
+     * On success, use getMainConfigFile() and getBackendType() for diagnostics.
+     *
+     * Example:
      * @code
      * Async::Config cfg;
-     * auto result = cfg.openWithFallback(config_arg, dbconfig_arg, "svxlink.conf");
-     * if (!result.success) {
-     *   cerr << "*** ERROR: " << result.error_message << endl;
-     *   return 1;
+     * if (!cfg.openWithFallback(config_arg, dbconfig_arg, "svxlink.conf")) {
+     *   cerr << "*** ERROR: " << cfg.getLastError() << endl;
+     *   exit(1);
      * }
-     * cout << "Configuration loaded from: " << result.source_path << endl;
+     * cout << "Loaded from: " << cfg.getMainConfigFile() << endl;
      * @endcode
      */
-    ConfigLoadResult openWithFallback(const std::string& cmdline_config,
-                                      const std::string& cmdline_dbconfig,
-                                      const std::string& default_config_name);
+    bool openWithFallback(const std::string& cmdline_config,
+                          const std::string& cmdline_dbconfig,
+                          const std::string& default_config_name);
+
+    /**
+     * @brief   Get the last error message from a failed open call
+     * @return  Human-readable error description, or empty string if no error
+     */
+    std::string getLastError(void) const { return m_last_error; }
     
     /**
      * @brief 	Return the string value of the given configuration variable
@@ -352,7 +353,7 @@ class Config
       std::string str_val;
       if (!getValue(section, tag, str_val))
       {
-	return missing_ok;
+	      return missing_ok;
       }
       std::stringstream ssval(str_val);
       Rsp tmp;
@@ -363,7 +364,7 @@ class Config
       }
       if (ssval.fail() || !ssval.eof())
       {
-	return false;
+	      return false;
       }
       rsp = tmp;
       return true;
@@ -398,7 +399,7 @@ class Config
       std::string str_val;
       if (!getValue(section, tag, str_val))
       {
-	return missing_ok;
+	      return missing_ok;
       }
       if (str_val.empty())
       {
@@ -580,7 +581,7 @@ class Config
       std::string str_val;
       if (!getValue(section, tag, str_val))
       {
-	return missing_ok;
+	      return missing_ok;
       }
       std::stringstream ssval(str_val);
       Rsp tmp;
@@ -591,11 +592,18 @@ class Config
       }
       if (ssval.fail() || !ssval.eof() || (tmp < min) || (tmp > max))
       {
-	return false;
+	      return false;
       }
       rsp = tmp;
       return true;
     } /* Config::getValue */
+
+    /**
+     * @brief   Opaque subscription handle returned by subscribeValue / subscribeOptionalValue
+     *
+     * Pass this to unsubscribeValue() to remove a specific callback.
+     */
+    using SubId = std::size_t;
 
     /**
      * @brief Subscribe to the given configuration variable (char*)
@@ -614,10 +622,10 @@ class Config
      * string (char*).
      */
     template <typename F=std::function<void(const char*)>>
-    void subscribeValue(const std::string& section, const std::string& tag,
-                        const char* def, F func)
+    SubId subscribeValue(const std::string& section, const std::string& tag,
+                         const char* def, F func)
     {
-      subscribeValue(section, tag, std::string(def),
+      return subscribeValue(section, tag, std::string(def),
           [=](const std::string& str_val) -> void
           {
             func(str_val.c_str());
@@ -641,20 +649,21 @@ class Config
      * non-container type (e.g. std::string, int, bool etc).
      */
     template <typename Rsp, typename F=std::function<void(const Rsp&)>>
-    void subscribeValue(const std::string& section, const std::string& tag,
-                        const Rsp& def, F func)
+    SubId subscribeValue(const std::string& section, const std::string& tag,
+                         const Rsp& def, F func)
     {
       Value& v = getValueP(section, tag, def);
-      v.subs.push_back(
-          [=](const std::string& str_val) -> void
+      SubId id = v.next_id++;
+      v.subs[id] = [=](const std::string& str_val) -> void
           {
             std::stringstream ssval(str_val);
             ssval.imbue(std::locale(ssval.getloc(), new empty_ctype));
             Rsp tmp;
             ssval >> tmp;
             func(tmp);
-          });
-      v.subs.back()(v.val);
+          };
+      v.subs[id](v.val);
+      return id;
     } /* subscribeValue */
 
     /**
@@ -676,19 +685,16 @@ class Config
      * auto-created when missing.
      */
     template <typename F=std::function<void(const std::string&)>>
-    void subscribeOptionalValue(const std::string& section, const std::string& tag, F func)
+    SubId subscribeOptionalValue(const std::string& section, const std::string& tag, F func)
     {
       Value& v = m_sections[section][tag];
-      v.subs.push_back(
-          [=](const std::string& str_val) -> void
-          {
-            func(str_val);
-          });
-      // Only call the callback if the value actually exists (non-empty)
+      SubId id = v.next_id++;
+      v.subs[id] = [=](const std::string& str_val) -> void { func(str_val); };
       if (!v.val.empty())
       {
-        v.subs.back()(v.val);
+        v.subs[id](v.val);
       }
+      return id;
     } /* subscribeOptionalValue */
 
     /**
@@ -709,12 +715,12 @@ class Config
      */
     template <template <typename, typename> class Container,
               typename Rsp, typename F=std::function<void(const Rsp&)>>
-    void subscribeValue(const std::string& section, const std::string& tag,
-                        const Container<Rsp, std::allocator<Rsp>>& def, F func)
+    SubId subscribeValue(const std::string& section, const std::string& tag,
+                         const Container<Rsp, std::allocator<Rsp>>& def, F func)
     {
       Value& v = getValueP(section, tag, def);
-      v.subs.push_back(
-          [=](const std::string& str_val) -> void
+      SubId id = v.next_id++;
+      v.subs[id] = [=](const std::string& str_val) -> void
           {
             std::stringstream ssval(str_val);
             ssval.imbue(std::locale(ssval.getloc(), new csv_whitespace));
@@ -734,8 +740,9 @@ class Config
               c.push_back(tmp);
             }
             func(std::move(c));
-          });
-      v.subs.back()(v.val);
+          };
+      v.subs[id](v.val);
+      return id;
     } /* Config::subscribeValue */
 
     /**
@@ -846,12 +853,35 @@ class Config
      */
     sigc::signal<void(const std::string&, const std::string&, const std::string&)> valueUpdated;
 
+    /**
+     * @brief   Remove a previously registered subscription
+     * @param   section The configuration section name
+     * @param   tag     The configuration tag name
+     * @param   id      The subscription ID returned by subscribeValue / subscribeOptionalValue
+     *
+     * If the id is no longer valid (already removed or never registered), this
+     * is a no-op.  Safe to call from within a subscribed callback.
+     */
+    void unsubscribeValue(const std::string& section, const std::string& tag, SubId id)
+    {
+      auto sec_it = m_sections.find(section);
+      if (sec_it != m_sections.end())
+      {
+        auto val_it = sec_it->second.find(tag);
+        if (val_it != sec_it->second.end())
+        {
+          val_it->second.subs.erase(id);
+        }
+      }
+    }
+
   private:
     using Subscriber = std::function<void(const std::string&)>;
     struct Value
     {
-      std::string             val;
-      std::vector<Subscriber> subs;
+      std::string                 val;
+      SubId                       next_id = 0;
+      std::map<SubId, Subscriber> subs;
     };
     typedef std::map<std::string, Value>  Values;
     typedef std::map<std::string, Values> Sections;
@@ -885,18 +915,41 @@ class Config
     };
 
     ConfigBackendPtr m_backend;
-    Sections         m_sections;  // In-memory cache for subscriptions
+    Sections         m_sections;       // In-memory cache for subscriptions
     std::string      m_main_config_file; // Path to main config file (for CFG_DIR resolution)
+    std::string      m_last_error;     // Last error from a failed open call
 
     void loadFromBackend(void);
     void syncToBackend(const std::string& section, const std::string& tag);
     void onBackendValueChanged(const std::string& section, const std::string& tag, const std::string& value);
     void connectBackendSignals(void);
     void finalizeBackendSetup(void);
+    void setBackend(ConfigBackendPtr backend);
+    void loadCfgDir(void);
     bool openFromDbConfigInternal(const std::string& db_conf_path,
                                   const std::string& default_config_name,
-                                  const std::string& default_table_prefix,
-                                  bool abort_on_failure);
+                                  const std::string& default_table_prefix);
+
+    struct DbConf
+    {
+      std::string type;
+      std::string source;
+      std::string table_prefix;
+      bool        enable_change_notifications;
+      unsigned int poll_interval_seconds;
+      DbConf() : enable_change_notifications(false), poll_interval_seconds(0) {}
+    };
+
+    static std::string findConfigFile(const std::string& config_dir,
+                                      const std::string& filename);
+    bool parseDbConfFile(const std::string& path, DbConf& conf);
+    void applyTablePrefix(DbConf& conf, const std::string& default_prefix);
+    ConfigBackendPtr createAndConfigureBackend(const DbConf& conf,
+                                              const std::string& default_config_file);
+    bool initializeDatabase(ConfigBackend* backend,
+                            const std::string& default_config_file);
+    bool populateFromExistingFiles(ConfigBackend* backend,
+                                   const std::string& config_file);
 
     template <class T>
     bool setValueFromString(T& val, const std::string &str) const

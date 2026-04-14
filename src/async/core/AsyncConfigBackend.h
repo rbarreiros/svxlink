@@ -41,6 +41,12 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <list>
 #include <memory>
 #include <ctime>
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
+#include <queue>
+#include <thread>
+#include <tuple>
 #include <sigc++/sigc++.h>
 
 /****************************************************************************
@@ -65,7 +71,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 namespace Async
 {
-  class Timer;
+  class FdWatch;
 }
 
 /****************************************************************************
@@ -320,44 +326,24 @@ class ConfigBackend : public sigc::trackable
     std::string getFullTableName(const std::string& base_name) const;
 
   private:
-    /**
-     * @brief   Timer callback for auto-polling
-     * @param   timer The timer that expired
-     */
-    void onPollTimer(Async::Timer* timer);
+    std::string               m_table_prefix;
+    std::atomic<bool>         m_enable_change_notifications;
+    unsigned int              m_default_poll_interval;
+    unsigned int              m_current_poll_interval;
 
-    /**
-     * @brief   Table prefix for database backends
-     */
-    std::string m_table_prefix;
+    // Non-blocking poll infrastructure
+    int                       m_wakeup_pipe[2];   // [0]=read, [1]=write
+    Async::FdWatch*           m_fd_watch;
+    std::mutex                m_queue_mutex;
+    std::queue<std::tuple<std::string,std::string,std::string>> m_pending_changes;
+    std::thread               m_poll_thread;
+    std::mutex                m_poll_mutex;
+    std::condition_variable   m_poll_cv;
+    std::atomic<bool>         m_poll_running;
 
-    /**
-     * @brief   Whether change notifications are enabled
-     * @return  true if notifications are enabled, false otherwise
-     */
-      bool m_enable_change_notifications;
+    void onWakeupPipe(Async::FdWatch* w);
+    void pollThreadFunc(unsigned int interval_ms);
 
-    /**
-     * @brief   Default polling interval
-     * @return  The default polling interval in milliseconds
-     */
-    unsigned int m_default_poll_interval;
-
-    /**
-     * @brief   Current polling interval
-     * @return  The current polling interval in milliseconds, 0 if not polling
-     */
-    unsigned int m_current_poll_interval;
-
-    /**
-     * @brief   Auto-polling timer
-     * @return  The auto-polling timer
-     */
-    Async::Timer* m_poll_timer;
-
-    /**
-     * @brief   Disable copy constructor and assignment operator
-     */
     ConfigBackend(const ConfigBackend&) = delete;
     ConfigBackend& operator=(const ConfigBackend&) = delete;
 

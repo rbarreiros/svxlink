@@ -331,26 +331,22 @@ class StdInSourceDev : public StdInSource
 
 int main(int argc, const char **argv)
 {
-  const char* config_file = nullptr;
-  const char* dbconfig_file = nullptr;
-  
-  // Simple argument parsing for --config and --dbconfig
+  string cli_config;
+  string cli_dbconfig;
+
   for (int i = 1; i < argc; i++)
   {
     if (strcmp(argv[i], "--config") == 0 && i + 1 < argc)
-    {
-      config_file = argv[++i];
-    }
+      cli_config = argv[++i];
     else if (strcmp(argv[i], "--dbconfig") == 0 && i + 1 < argc)
-    {
-      dbconfig_file = argv[++i];
-    }
+      cli_dbconfig = argv[++i];
     else if (strcmp(argv[i], "--help") == 0)
     {
-      cout << "Usage: " << argv[0] << " [--config <file>] [--dbconfig <file>] [--help]\n";
-      cout << "  --config <file>    Specify configuration file to use\n";
-      cout << "  --dbconfig <file>  Specify database configuration file to use\n";
-      cout << "  --help             Show this help message\n";
+      cout << "Usage: " << argv[0]
+           << " [--config <file>] [--dbconfig <file>]\n\n"
+           << "Audio is read from stdin (raw signed 16-bit mono).\n"
+           << "If no config option is given, standard locations are\n"
+           << "searched for db.conf and then svxlink.conf.\n";
       exit(0);
     }
   }
@@ -461,47 +457,11 @@ int main(int argc, const char **argv)
   */
 
   Async::Config cfg;
-  string cfg_filename;
-  
-  // Configuration backend selection logic
-  if (config_file != nullptr)
+  if (!cfg.openWithFallback(cli_config, cli_dbconfig, "svxlink.conf") &&
+      (!cli_config.empty() || !cli_dbconfig.empty()))
   {
-    // --config specified, use file backend
-    cfg_filename = string(config_file);
-    cout << "Using file backend with config file: " << cfg_filename << endl;
-    if (!cfg.openDirect("file://" + cfg_filename))
-    {
-      cout << "*** ERROR: Could not open configuration file: " << cfg_filename << endl;
-      exit(1);
-    }
-  }
-  else if (dbconfig_file != nullptr)
-  {
-    // --dbconfig specified, use database backend
-    cout << "Using database backend with db config file: " << dbconfig_file << endl;
-    if (!cfg.openFromDbConfig(string(dbconfig_file)))
-    {
-      cout << "*** ERROR: Could not initialize database configuration system with: " 
-           << dbconfig_file << endl;
-      exit(1);
-    }
-  }
-  else
-  {
-    // Default: try to find configuration file
-    cout << "No configuration arguments specified, searching in standard locations..." << endl;
-    if (!cfg.open())
-    {
-      // Fallback to legacy location
-      cfg_filename = string(getenv("HOME"));
-      cfg_filename += "/.svxlink/svxlink.conf";
-      if (!cfg.openDirect("file://" + cfg_filename))
-      {
-        cout << "*** ERROR: Could not open configuration file: " << cfg_filename << endl;
-        cout << "Use --config or --dbconfig to specify a configuration file." << endl;
-        exit(1);
-      }
-    }
+    cerr << "*** ERROR: " << cfg.getLastError() << endl;
+    exit(1);
   }
 
   //string rx_name("RxRtl");

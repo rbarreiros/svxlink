@@ -1619,15 +1619,22 @@ void Reflector::cfgUpdated(const std::string& section, const std::string& tag, c
     }
     else if (tag == "RANDOM_QSY_RANGE")
     {
-      m_random_qsy_lo = std::atoi(value.c_str());
-      m_random_qsy_hi = std::atoi(value.c_str());
-
-      if((m_random_qsy_lo < 1) || (m_random_qsy_hi < m_random_qsy_lo))
+      SvxLink::SepPair<uint32_t, uint32_t> range;
+      if (m_cfg->getValue("GLOBAL", tag, range))
       {
-        std::cout << "*** ERROR: Illegal RANDOM_QSY_RANGE specified. Ignored." << std::endl;
-        m_random_qsy_hi = m_random_qsy_lo = 0;
+        m_random_qsy_lo = range.first;
+        m_random_qsy_hi = m_random_qsy_lo + range.second - 1;
+        if ((m_random_qsy_lo < 1) || (m_random_qsy_hi < m_random_qsy_lo))
+        {
+          cout << "*** WARNING: Illegal RANDOM_QSY_RANGE specified. Ignored." << endl;
+          m_random_qsy_hi = m_random_qsy_lo = 0;
+        }
+        m_random_qsy_tg = m_random_qsy_hi;
       }
-      m_random_qsy_tg = m_random_qsy_hi;
+      else
+      {
+        m_random_qsy_hi = m_random_qsy_lo = m_random_qsy_tg = 0;
+      }
     }
     else if (tag == "HTTP_SRV_PORT")
     {

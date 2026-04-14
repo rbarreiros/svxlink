@@ -43,7 +43,6 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <sys/types.h>
 #include <grp.h>
 #include <pwd.h>
-#include <dirent.h>
 #include <termios.h>
 #include <errno.h>
 
@@ -141,6 +140,7 @@ namespace {
   char*                 dbconfig = nullptr;
   int                   daemonize = 0;
   int                   quiet = 0;
+  int                   init_db = 0;
   FdWatch*              stdin_watch = 0;
   LogWriter             logwriter;
 };
@@ -274,77 +274,34 @@ int main(int argc, const char *argv[])
   }
 
   Config cfg;
-  auto result = cfg.openWithFallback(config ? string(config) : "",
-                                      dbconfig ? string(dbconfig) : "",
-                                      "svxreflector.conf");
-  if (!result.success)
+  if (!cfg.openWithFallback(config ? string(config) : "",
+                             dbconfig ? string(dbconfig) : "",
+                             "svxreflector.conf"))
   {
-    cerr << "*** ERROR: " << result.error_message << endl;
+    cerr << "*** ERROR: " << cfg.getLastError() << endl;
     exit(1);
   }
 
-  cout << "Configuration loaded from: " << result.source_path 
-       << " (" << result.backend_type << " backend)" << endl;
-  
-  string cfg_filename = result.source_path;
-  string main_cfg_filename(cfg_filename);
+  cout << "Configuration loaded from: " << cfg.getMainConfigFile()
+       << " (" << cfg.getBackendType() << " backend)" << endl;
 
-  std::string main_cfg_dir = ".";
-  auto slash_pos = main_cfg_filename.rfind('/');
-  if (slash_pos != std::string::npos)
+  if (init_db)
   {
-    main_cfg_dir = main_cfg_filename.substr(0, slash_pos);
-  }
-
-  // CFG_DIR processing: Only applies to file backend
-  // Database backend loads ALL configuration from database and ignores files
-  if (cfg.getBackendType() == "file")
-  {
-    string cfg_dir;
-    if (cfg.getValue("GLOBAL", "CFG_DIR", cfg_dir))
+    if (cfg.getBackendType() == "file")
     {
-      if (cfg_dir[0] != '/')
-      {
-        cfg_dir = main_cfg_dir + "/" + cfg_dir;
-      }
-
-      DIR *dir = opendir(cfg_dir.c_str());
-      if (dir == NULL)
-      {
-        cerr << "*** ERROR: Could not read from directory specified by "
-             << "configuration variable GLOBAL/CFG_DIR=" << cfg_dir << endl;
-        exit(1);
-      }
-
-      struct dirent *dirent;
-      while ((dirent = readdir(dir)) != NULL)
-      {
-        char *dot = strrchr(dirent->d_name, '.');
-        if ((dot == NULL) || (dirent->d_name[0] == '.') ||
-            (strcmp(dot, ".conf") != 0))
-        {
-          continue;
-        }
-        cfg_filename = cfg_dir + "/" + dirent->d_name;
-        if (!cfg.openDirect("file://" + cfg_filename))
-        {
-          cerr << "*** ERROR: Could not open configuration file: "
-               << cfg_filename << endl;
-          exit(1);
-        }
-      }
-
-      if (closedir(dir) == -1)
-      {
-        cerr << "*** ERROR: Error closing directory specified by "
-             << "configuration variable GLOBAL/CFG_DIR=" << cfg_dir << endl;
-        exit(1);
-      }
+      cerr << "*** ERROR: --init-db requires a database backend"
+              " (use --dbconfig or set up db.conf)" << endl;
+      exit(1);
     }
-  }
-  else
-  {
-    cout << "Using " << cfg.getBackendType() << " backend - CFG_DIR processing skipped (all config loaded from database)" << endl;
+    if (!cfg.listSections().empty())
+    {
+      cout << "*** WARNING: --init-db: database is not empty, skipping import" << endl;
+    }
+    else
+    {
+      if (!cfg.importFromConfigFile("svxreflector.conf"))
+        cerr << "*** WARNING: --init-db: could not import from svxreflector.conf" << endl;
+    }
   }
 
   std::string tstamp_format = "%c";
@@ -359,7 +316,7 @@ int main(int argc, const char *argv[])
           "terms and conditions in the\n";
   cout << "GNU GPL (General Public License) version 2 or later.\n";
 
-  cout << "\nUsing configuration file: " << main_cfg_filename << endl;
+  cout << "\nUsing configuration file: " << cfg.getMainConfigFile() << endl;
 
   struct termios org_termios = {0};
   if (logfile_name == 0)
@@ -433,6 +390,8 @@ static void parse_arguments(int argc, const char **argv)
 	    "Specify the configuration file to use", "<filename>"},
     {"dbconfig", 0, POPT_ARG_STRING, &dbconfig, 0,
 	    "Specify the database configuration file to use", "<filename>"},
+    {"init-db", 0, POPT_ARG_NONE, &init_db, 0,
+	    "Initialize an empty database backend from the installed svxreflector.conf", NULL},
     /*
     {"int_arg", 'i', POPT_ARG_INT, &int_arg, 0,
 	    "Description of int argument", "<an int>"},

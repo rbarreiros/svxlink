@@ -29,8 +29,11 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
 #include "AsyncConfigBackend.h"
 #include "AsyncConfigSource.h"
-#include "AsyncTimer.h"
+#include "AsyncFdWatch.h"
 #include <iostream>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cstring>
 
 namespace Async
 {
@@ -39,14 +42,10 @@ ConfigBackend::ConfigBackend(bool enable_notifications, unsigned int auto_poll_i
   : m_enable_change_notifications(enable_notifications),
     m_default_poll_interval(auto_poll_interval_ms),
     m_current_poll_interval(0),
-    m_poll_timer(nullptr)
+    m_fd_watch(nullptr),
+    m_poll_running(false)
 {
-  // Auto-start polling if notifications are enabled and interval > 0
-  /* We can't start the polling here, because the database may not be initialized yet */
-  //if (m_enable_change_notifications && auto_poll_interval_ms > 0)
-  //{
-  //  startAutoPolling(auto_poll_interval_ms);
-  //}
+  m_wakeup_pipe[0] = m_wakeup_pipe[1] = -1;
 }
 
 ConfigBackend::~ConfigBackend(void)
@@ -88,31 +87,71 @@ void ConfigBackend::startAutoPolling(unsigned int interval_ms)
     return;
   }
 
-  // Always make sure the cleanup is done first!!
   stopAutoPolling();
 
-  std::cout << "Starting auto-polling with interval: " 
-    << interval_ms << " milliseconds" << std::endl;
+  if (::pipe(m_wakeup_pipe) == -1)
+  {
+    std::cerr << "*** ERROR: ConfigBackend: pipe() failed: "
+              << strerror(errno) << std::endl;
+    return;
+  }
+  // Make the read end non-blocking so drain reads never stall
+  int flags = ::fcntl(m_wakeup_pipe[0], F_GETFL, 0);
+  ::fcntl(m_wakeup_pipe[0], F_SETFL, flags | O_NONBLOCK);
+
+  m_fd_watch = new Async::FdWatch(m_wakeup_pipe[0], Async::FdWatch::FD_WATCH_RD);
+  m_fd_watch->activity.connect(sigc::mem_fun(*this, &ConfigBackend::onWakeupPipe));
+
+  std::cout << "Starting async config polling (interval "
+            << interval_ms << " ms)" << std::endl;
 
   m_current_poll_interval = interval_ms;
-  m_poll_timer = new Async::Timer(interval_ms, Async::Timer::TYPE_PERIODIC, true);
-  m_poll_timer->expired.connect(sigc::mem_fun(*this, &ConfigBackend::onPollTimer));
+  m_poll_running = true;
+  m_poll_thread = std::thread(&ConfigBackend::pollThreadFunc, this, interval_ms);
 }
 
 void ConfigBackend::stopAutoPolling(void)
 {
-  if (m_poll_timer != nullptr)
+  if (!m_poll_running.load())
   {
-    std::cout << "Stopping auto-polling" << std::endl;
-    delete m_poll_timer;
-    m_poll_timer = nullptr;
-    m_current_poll_interval = 0;
+    return;
   }
+
+  {
+    std::lock_guard<std::mutex> lock(m_poll_mutex);
+    m_poll_running = false;
+  }
+  m_poll_cv.notify_all();
+
+  if (m_poll_thread.joinable())
+  {
+    m_poll_thread.join();
+  }
+
+  delete m_fd_watch;
+  m_fd_watch = nullptr;
+
+  if (m_wakeup_pipe[0] != -1)
+  {
+    ::close(m_wakeup_pipe[0]);
+    ::close(m_wakeup_pipe[1]);
+    m_wakeup_pipe[0] = m_wakeup_pipe[1] = -1;
+  }
+
+  // Discard any queued changes that never made it to the event loop
+  {
+    std::lock_guard<std::mutex> lock(m_queue_mutex);
+    while (!m_pending_changes.empty())
+      m_pending_changes.pop();
+  }
+
+  m_current_poll_interval = 0;
+  std::cout << "Stopped async config polling" << std::endl;
 }
 
 bool ConfigBackend::isAutoPolling(void) const
 {
-  return (m_poll_timer != nullptr);
+  return m_poll_running.load();
 }
 
 unsigned int ConfigBackend::getPollingInterval(void) const
@@ -120,19 +159,79 @@ unsigned int ConfigBackend::getPollingInterval(void) const
   return m_current_poll_interval;
 }
 
-void ConfigBackend::onPollTimer(Async::Timer* timer)
+void ConfigBackend::pollThreadFunc(unsigned int interval_ms)
 {
-  //std::cout << "Checking for external changes" << " -- next check in " << timer->timeout() << " milliseconds" << std::endl;
-  checkForExternalChanges();
+  std::unique_lock<std::mutex> lock(m_poll_mutex);
+  while (m_poll_running.load())
+  {
+    auto status = m_poll_cv.wait_for(lock,
+        std::chrono::milliseconds(interval_ms));
+
+    if (!m_poll_running.load())
+    {
+      break;
+    }
+
+    if (status == std::cv_status::timeout)
+    {
+      lock.unlock();
+      checkForExternalChanges();
+      lock.lock();
+    }
+  }
+}
+
+void ConfigBackend::onWakeupPipe(Async::FdWatch*)
+{
+  // Drain all notification bytes written by the poll thread
+  char buf[64];
+  while (::read(m_wakeup_pipe[0], buf, sizeof(buf)) > 0) {}
+
+  // Swap-out the queue so we hold the lock for the shortest possible time
+  std::queue<std::tuple<std::string,std::string,std::string>> batch;
+  {
+    std::lock_guard<std::mutex> lock(m_queue_mutex);
+    std::swap(batch, m_pending_changes);
+  }
+
+  // Emit all queued valueChanged signals on the event-loop thread
+  while (!batch.empty())
+  {
+    auto& [section, tag, value] = batch.front();
+    valueChanged(section, tag, value);
+    batch.pop();
+  }
 }
 
 void ConfigBackend::notifyValueChanged(const std::string& section,
                                       const std::string& tag,
                                       const std::string& value)
 {
-  if (m_enable_change_notifications)
+  if (!m_enable_change_notifications.load())
   {
-    std::cout << "Configuration changed: [" << section << "]/" << tag << " = " << value << std::endl;
+    return;
+  }
+
+  std::cout << "Configuration changed: [" << section << "]/" << tag
+            << " = " << value << std::endl;
+
+  if (m_wakeup_pipe[1] != -1)
+  {
+    // Called from the poll thread: queue the change and wake the event loop
+    {
+      std::lock_guard<std::mutex> lock(m_queue_mutex);
+      m_pending_changes.emplace(section, tag, value);
+    }
+    char byte = 1;
+    if (::write(m_wakeup_pipe[1], &byte, sizeof(byte)) == -1 && errno != EAGAIN)
+    {
+      std::cerr << "*** WARNING: ConfigBackend: wakeup pipe write failed: "
+                << strerror(errno) << std::endl;
+    }
+  }
+  else
+  {
+    // No polling thread active: emit directly on the calling (event-loop) thread
     valueChanged(section, tag, value);
   }
 }

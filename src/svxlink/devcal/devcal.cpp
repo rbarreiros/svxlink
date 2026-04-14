@@ -525,65 +525,42 @@ int main(int argc, const char *argv[])
   cout << fixed;
 
   Config cfg;
-  
-  // Configuration backend selection logic
+
+  // Map CLI options to openWithFallback arguments.
+  // --config → explicit file backend; --dbconfig → explicit DB backend;
+  // positional cfgfile → legacy path (auto-detect db.conf by name for compat).
+  string cli_config;
+  string cli_dbconfig;
   if (config != nullptr)
   {
-    // --config specified, use file backend
-    cout << "Using file backend with config file: " << cfgfile << endl;
-    if (!cfg.openDirect("file://" + cfgfile))
-    {
-      cerr << "*** ERROR: Could not open configuration file \"" << cfgfile << "\".\n";
-      exit(1);
-    }
+    cli_config = cfgfile;
   }
   else if (dbconfig != nullptr)
   {
-    // --dbconfig specified, use database backend
-    cout << "Using database backend with db config file: " << cfgfile << endl;
-    if (!cfg.openFromDbConfig(cfgfile))
-    {
-      cerr << "*** ERROR: Could not initialize database configuration system with: " 
-           << cfgfile << endl;
-      exit(1);
-    }
+    cli_dbconfig = cfgfile;
+  }
+  else if (!cfgfile.empty())
+  {
+    if (cfgfile.find("db.conf") != string::npos)
+      cli_dbconfig = cfgfile;
+    else
+      cli_config = cfgfile;
   }
   else
   {
-    // Positional argument specified or no config specified
-    if (!cfgfile.empty())
-    {
-      // Auto-detect if this is a db.conf file or regular config file
-      bool is_dbconf = (cfgfile.find("db.conf") != string::npos);
-      
-      bool config_loaded = false;
-      if (is_dbconf)
-      {
-        cout << "Detected db.conf file, loading database configuration..." << endl;
-        config_loaded = cfg.openFromDbConfig(cfgfile);
-      }
-      else
-      {
-        cout << "Loading file-based configuration..." << endl;
-        config_loaded = cfg.openDirect("file://" + cfgfile);
-      }
-      
-      if (!config_loaded)
-      {
-        cerr << "*** ERROR: Could not open configuration from \"" << cfgfile << "\".\n";
-        exit(1);
-      }
-      
-      cout << "Configuration loaded from " << cfgfile 
-           << " using " << cfg.getBackendType() << " backend" << endl;
-    }
-    else
-    {
-      cerr << "*** ERROR: No configuration file specified.\n";
-      cerr << "Usage: Use --config <file>, --dbconfig <db.conf>, or provide config file/db.conf as argument.\n";
-      exit(1);
-    }
+    cerr << "*** ERROR: No configuration file specified.\n"
+            "Use --config <file>, --dbconfig <db.conf>, "
+            "or provide the config path as a positional argument.\n";
+    exit(1);
   }
+
+  if (!cfg.openWithFallback(cli_config, cli_dbconfig, "svxlink.conf"))
+  {
+    cerr << "*** ERROR: " << cfg.getLastError() << "\n";
+    exit(1);
+  }
+  cout << "Configuration loaded from: " << cfg.getMainConfigFile()
+       << " (" << cfg.getBackendType() << " backend)" << endl;
 
   AudioIO *audio_io = 0;
   if (cal_tx)
