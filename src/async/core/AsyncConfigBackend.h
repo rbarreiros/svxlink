@@ -1,7 +1,7 @@
 /**
 @file	 AsyncConfigBackend.h
 @brief   Abstract base class for configuration backends
-@author  Rui Barreiros
+@author  Rui Barreiros / CR7BPM
 @date	 2025-09-19
 
 This file contains the base class declarationfor configuration backends that

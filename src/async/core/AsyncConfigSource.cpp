@@ -1,7 +1,7 @@
 /**
 @file   AsyncConfigSource.cpp
 @brief  Implementation of configuration source URL parser
-@author Rui Barreiros
+@author Rui Barreiros / CR7BPM
 @date   2025-10-20
 
 This file contains the implementation of the ConfigSource class that is used to

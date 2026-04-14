@@ -1,7 +1,7 @@
 /**
 @file   AsyncConfigSource.h
 @brief  Configuration source URL parser and backend detection
-@author Rui Barreiros
+@author Rui Barreiros / CR7BPM
 @date   2025-10-20
 
 This file contains the declaration of the ConfigSource class that is used to
