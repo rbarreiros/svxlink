@@ -107,6 +107,8 @@ PostgreSQLConfigBackend::PostgreSQLConfigBackend(void)
 
 PostgreSQLConfigBackend::~PostgreSQLConfigBackend(void)
 {
+  // Stop the poll thread before closing the connection handle!!!
+  stopAutoPolling();
   close();
 } /* PostgreSQLConfigBackend::~PostgreSQLConfigBackend */
 

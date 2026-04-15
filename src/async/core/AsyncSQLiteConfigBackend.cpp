@@ -107,6 +107,8 @@ SQLiteConfigBackend::SQLiteConfigBackend(void)
 
 SQLiteConfigBackend::~SQLiteConfigBackend(void)
 {
+  // Stop the poll thread before closing the database handle!!!  
+  stopAutoPolling();
   close();
 } /* SQLiteConfigBackend::~SQLiteConfigBackend */
 

@@ -242,11 +242,11 @@ void demonstrateBackend(Config& cfg)
   // Value subscription
   cout << "Demonstrating value subscription..." << endl;
 
-  cfg.subscribeValue("GLOBAL", "LOGICS", string("DefaultLogic"),
-                     [](const string& val) {
-                       cout << "  Subscription callback: GLOBAL/LOGICS = \""
-                            << val << "\"" << endl;
-                     });
+  auto sub = cfg.subscribeValue("GLOBAL", "LOGICS", string("DefaultLogic"),
+                                [](const string& val) {
+                                  cout << "  Subscription callback: GLOBAL/LOGICS = \""
+                                       << val << "\"" << endl;
+                                });
 
   cfg.setValue("GLOBAL", "LOGICS", "ChangedLogic");
 

@@ -108,6 +108,8 @@ MySQLConfigBackend::MySQLConfigBackend(void)
 
 MySQLConfigBackend::~MySQLConfigBackend(void)
 {
+  // Stop the poll thread before closing the connection handle!!!
+  stopAutoPolling();
   close();
 } /* MySQLConfigBackend::~MySQLConfigBackend */
 

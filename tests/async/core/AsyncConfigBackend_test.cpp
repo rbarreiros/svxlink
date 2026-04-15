@@ -569,7 +569,7 @@ TEST_CASE("Config – subscribeValue fires on first set and on change", "[config
   REQUIRE(cfg.openDirect("sqlite://" + db.path()));
 
   std::vector<std::string> received;
-  cfg.subscribeValue("GLOBAL", "LOGICS", std::string("Default"),
+  auto sub = cfg.subscribeValue("GLOBAL", "LOGICS", std::string("Default"),
     [&](const std::string& val) {
       received.push_back(val);
     });
@@ -596,7 +596,7 @@ TEST_CASE("Config – subscribeValue uses existing value when present", "[config
   cfg.setValue("GLOBAL", "LOGICS", "PreExisting");
 
   std::string got;
-  cfg.subscribeValue("GLOBAL", "LOGICS", std::string("Default"),
+  auto sub = cfg.subscribeValue("GLOBAL", "LOGICS", std::string("Default"),
     [&](const std::string& val) { got = val; });
 
   // Must receive the pre-existing value, not the default

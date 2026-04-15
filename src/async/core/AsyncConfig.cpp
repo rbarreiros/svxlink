@@ -411,15 +411,7 @@ ConfigBackendPtr Config::createAndConfigureBackend(const DbConf& conf,
     return nullptr;
   }
 
-  string source_url;
-  if (conf.type == "file")
-    source_url = conf.source;
-  else if (conf.type == "sqlite")
-    source_url = "sqlite://" + conf.source;
-  else
-    source_url = conf.source;
-
-  ConfigBackendPtr backend = createConfigBackend(source_url);
+  ConfigBackendPtr backend = createConfigBackendByType(conf.type, conf.source);
   if (!backend)
   {
     cerr << "*** ERROR: Failed to create " << conf.type << " backend" << endl;

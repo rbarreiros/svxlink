@@ -486,8 +486,7 @@ bool NetTrxAdapter::initialize(void)
   prev_src->registerSink(rxa1, true);
   prev_src = 0;
 
-  cfg.subscribeValue(net_uplink_name, "RX_SIGLEV", 1.0f, [this](float siglev) {
-    // We could have a class member holding this....
+  m_sub_rx_siglev = cfg.subscribeValue(net_uplink_name, "RX_SIGLEV", 1.0f, [this](float siglev) {
     char rx_id = Rx::ID_UNKNOWN;
     if (!cfg.getValue(net_uplink_name, "RX_ID", rx_id, true))
     {

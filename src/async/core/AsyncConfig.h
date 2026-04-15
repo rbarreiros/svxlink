@@ -599,11 +599,86 @@ class Config
     } /* Config::getValue */
 
     /**
-     * @brief   Opaque subscription handle returned by subscribeValue / subscribeOptionalValue
-     *
-     * Pass this to unsubscribeValue() to remove a specific callback.
+     * @brief   Opaque subscription ID (internal use / unsubscribeValue).
      */
     using SubId = std::size_t;
+
+    /**
+     * @brief   Subscription handle returned by subscribeValue / subscribeOptionalValue
+     *
+     * Holds a live subscription.  When destroyed (or reset() is called) the
+     * subscription is automatically removed from the Config so that the stored
+     * std::function — and therefore any code in a plugin library that was
+     * captured by the callback — is destroyed while that library is still
+     * loaded.  This prevents the use-after-dlclose crash that occurs when
+     * Config::~Config tries to destroy subscriber callbacks whose _M_manager
+     * lives in an already-unloaded shared library.
+     *
+     * Store one Subscription per subscribeValue / subscribeOptionalValue call
+     * as a member variable of the subscribing class.  The Subscription is
+     * move-only; it cannot be copied!
+     */
+    class Subscription
+    {
+    public:
+      Subscription() = default;
+
+      ~Subscription() { reset(); }
+
+      Subscription(Subscription&& other) noexcept
+        : m_cfg(other.m_cfg),
+          m_section(std::move(other.m_section)),
+          m_tag(std::move(other.m_tag)),
+          m_id(other.m_id)
+      {
+        other.m_cfg = nullptr;
+      }
+
+      Subscription& operator=(Subscription&& other) noexcept
+      {
+        if (this != &other)
+        {
+          reset();
+          m_cfg     = other.m_cfg;
+          m_section = std::move(other.m_section);
+          m_tag     = std::move(other.m_tag);
+          m_id      = other.m_id;
+          other.m_cfg = nullptr;
+        }
+        return *this;
+      }
+
+      Subscription(const Subscription&)            = delete;
+      Subscription& operator=(const Subscription&) = delete;
+
+      /** Cancel the subscription immediately. */
+      void reset()
+      {
+        if (m_cfg != nullptr)
+        {
+          m_cfg->unsubscribeValue(m_section, m_tag, m_id);
+          m_cfg = nullptr;
+        }
+      }
+
+      bool valid() const { return m_cfg != nullptr; }
+
+    private:
+      friend class Config;
+
+      Config*     m_cfg    = nullptr;
+      std::string m_section;
+      std::string m_tag;
+      SubId       m_id{};
+
+      Subscription(Config* cfg, std::string sec, std::string tag, SubId id)
+        : m_cfg(cfg),
+          m_section(std::move(sec)),
+          m_tag(std::move(tag)),
+          m_id(id)
+      {
+      }
+    }; /* class Subscription */
 
     /**
      * @brief Subscribe to the given configuration variable (char*)
@@ -622,8 +697,8 @@ class Config
      * string (char*).
      */
     template <typename F=std::function<void(const char*)>>
-    SubId subscribeValue(const std::string& section, const std::string& tag,
-                         const char* def, F func)
+    Subscription subscribeValue(const std::string& section, const std::string& tag,
+                                const char* def, F func)
     {
       return subscribeValue(section, tag, std::string(def),
           [=](const std::string& str_val) -> void
@@ -649,8 +724,8 @@ class Config
      * non-container type (e.g. std::string, int, bool etc).
      */
     template <typename Rsp, typename F=std::function<void(const Rsp&)>>
-    SubId subscribeValue(const std::string& section, const std::string& tag,
-                         const Rsp& def, F func)
+    Subscription subscribeValue(const std::string& section, const std::string& tag,
+                                const Rsp& def, F func)
     {
       Value& v = getValueP(section, tag, def);
       SubId id = v.next_id++;
@@ -663,7 +738,7 @@ class Config
             func(tmp);
           };
       v.subs[id](v.val);
-      return id;
+      return Subscription(this, section, tag, id);
     } /* subscribeValue */
 
     /**
@@ -685,7 +760,7 @@ class Config
      * auto-created when missing.
      */
     template <typename F=std::function<void(const std::string&)>>
-    SubId subscribeOptionalValue(const std::string& section, const std::string& tag, F func)
+    Subscription subscribeOptionalValue(const std::string& section, const std::string& tag, F func)
     {
       Value& v = m_sections[section][tag];
       SubId id = v.next_id++;
@@ -694,7 +769,7 @@ class Config
       {
         v.subs[id](v.val);
       }
-      return id;
+      return Subscription(this, section, tag, id);
     } /* subscribeOptionalValue */
 
     /**
@@ -715,8 +790,8 @@ class Config
      */
     template <template <typename, typename> class Container,
               typename Rsp, typename F=std::function<void(const Rsp&)>>
-    SubId subscribeValue(const std::string& section, const std::string& tag,
-                         const Container<Rsp, std::allocator<Rsp>>& def, F func)
+    Subscription subscribeValue(const std::string& section, const std::string& tag,
+                                const Container<Rsp, std::allocator<Rsp>>& def, F func)
     {
       Value& v = getValueP(section, tag, def);
       SubId id = v.next_id++;
@@ -742,7 +817,7 @@ class Config
             func(std::move(c));
           };
       v.subs[id](v.val);
-      return id;
+      return Subscription(this, section, tag, id);
     } /* Config::subscribeValue */
 
     /**

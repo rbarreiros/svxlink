@@ -373,25 +373,23 @@ int main(int argc, char **argv)
   // Hot-reload LOCATION_INFO: tear down and re-initialize LocationInfo when
   // the value changes at runtime.  We only subscribe for LOCATION INFO changes, 
   // because everything else requires a full restart.
-  cfg.subscribeOptionalValue("GLOBAL", "LOCATION_INFO", [&cfg](const std::string& value) {
-      // Do we have a location info section already ?!!??!
-      if(LocationInfo::has_instance())
-      {
-        LocationInfo::deleteInstance();
-      }
-
-      if(value.empty())
-      {
-        return;
-      }
-      
-      if (!LocationInfo::initialize(cfg, value))
-      {
-        std::cerr << "*** ERROR: Could not initialize the location info "
-                  << "subsystem. Check configuration section [" << value << "]."
-                  << std::endl;
-      }
-  });
+  auto loc_info_sub = cfg.subscribeOptionalValue("GLOBAL", "LOCATION_INFO",
+      [&cfg](const std::string& value) {
+        if(LocationInfo::has_instance())
+        {
+          LocationInfo::deleteInstance();
+        }
+        if(value.empty())
+        {
+          return;
+        }
+        if (!LocationInfo::initialize(cfg, value))
+        {
+          std::cerr << "*** ERROR: Could not initialize the location info "
+                    << "subsystem. Check configuration section [" << value << "]."
+                    << std::endl;
+        }
+      });
 
   // Init Logiclinking
   if (cfg.getValue("GLOBAL", "LINKS", value))
