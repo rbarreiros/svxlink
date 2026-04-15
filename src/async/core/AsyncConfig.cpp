@@ -210,6 +210,16 @@ bool Config::openDirect(const string& source)
     m_main_config_file = ""; // Database backend - no single file
   }
 
+  // For database backends ensure the schema exists before any use.
+  // FileConfigBackend::initializeTables() is a no-op so this is safe for all
+  // backend types.
+  if (!m_backend->initializeTables())
+  {
+    cerr << "*** ERROR: Failed to initialize backend tables for: " << source << endl;
+    m_backend.reset();
+    return false;
+  }
+
   finalizeBackendSetup();
   return true;
 } /* Config::openDirect */
@@ -801,6 +811,13 @@ void Config::syncToBackend(const std::string& section, const std::string& tag)
     return;
   }
 
+  // Temporarily disable notifications so we don't fire twice!
+  bool was_enabled = m_backend->changeNotificationsEnabled();
+  if (was_enabled)
+  {
+    m_backend->enableChangeNotifications(false);
+  }
+
   // Get the value from in-memory
   Sections::const_iterator sec_it = m_sections.find(section);
   if (sec_it != m_sections.end())
@@ -814,6 +831,12 @@ void Config::syncToBackend(const std::string& section, const std::string& tag)
              << section << "/" << tag << endl;
       }
     }
+  }
+
+  // Restore notifications if they were enabled
+  if (was_enabled)
+  {
+    m_backend->enableChangeNotifications(true);
   }
 } /* Config::syncToBackend */
 
