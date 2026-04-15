@@ -81,10 +81,8 @@ using namespace Async;
  *
  ****************************************************************************/
 
-void demonstrateBackend(const string& config_dir);
 void showAvailableBackends();
-void createSampleDbConfig(const string& config_dir);
-void demonstrateDbConfigInit(void);
+void demonstrateBackend(Config& cfg);
 
 /****************************************************************************
  *
@@ -109,35 +107,49 @@ int main(int argc, char **argv)
   cout << "SVXLink Configuration Backend Demo" << endl;
   cout << "==================================" << endl << endl;
 
-  // Show available backends
   showAvailableBackends();
 
-  // Demonstrate the new db.conf initialization method
-  cout << "=== New db.conf Initialization Method ===" << endl;
-  demonstrateDbConfigInit();
+  Config cfg;
 
   if (argc >= 2)
   {
-    string config_dir = argv[1];
-    cout << "\n=== Custom Configuration Directory ===" << endl;
-    cout << "Using configuration directory: " << config_dir << endl;
-    
-    // Create sample db.conf
-    createSampleDbConfig(config_dir);
-    
-    // Demonstrate the backend
-    demonstrateBackend(config_dir);
+    // User supplied a db.conf path.  We only read it — the directory must
+    // already exist and be accessible.  Exit immediately if the file is
+    // missing rather than trying to create it.
+    const string db_conf_path = argv[1];
+    {
+      ifstream check(db_conf_path);
+      if (!check.good())
+      {
+        cerr << "*** ERROR: db.conf not found or not readable: "
+             << db_conf_path << endl;
+        return 1;
+      }
+    }
+
+    cout << "Using db.conf: " << db_conf_path << endl;
+    if (!cfg.open(db_conf_path))
+    {
+      cerr << "*** ERROR: Failed to open configuration from: "
+           << db_conf_path << endl;
+      return 1;
+    }
   }
   else
   {
-    cout << "\nUsage: " << argv[0] << " [config_directory]" << endl;
-    cout << endl;
-    cout << "If no config directory is specified, the standard search paths will be used:" << endl;
-    cout << "  ~/.svxlink/db.conf" << endl;
-    cout << "  /etc/svxlink/db.conf" << endl;
-    cout << "  /usr/local/etc/svxlink/db.conf (or system install directory)" << endl;
+    // No db.conf provided — fall back to a temporary SQLite database so the
+    // demo can run without any prior setup.
+    const string fallback_url = "sqlite:///tmp/AsyncConfigBackend_demo.db";
+    cout << "No db.conf specified.  Using fallback SQLite database:" << endl;
+    cout << "  " << fallback_url << endl << endl;
+    if (!cfg.openDirect(fallback_url))
+    {
+      cerr << "*** ERROR: Failed to open fallback SQLite database" << endl;
+      return 1;
+    }
   }
 
+  demonstrateBackend(cfg);
   return 0;
 } /* main */
 
@@ -149,156 +161,95 @@ int main(int argc, char **argv)
 
 void showAvailableBackends()
 {
-  cout << "Available configuration backends: " 
+  cout << "Available configuration backends: "
        << ConfigBackendFactory::validFactories() << endl << endl;
 
-  // Show detailed availability
   cout << "Backend availability:" << endl;
-  cout << "  File:       " 
-       << (ConfigSource::isBackendAvailable("file") ? "Yes" : "No") 
+  cout << "  File:       "
+       << (ConfigSource::isBackendAvailable("file")       ? "Yes" : "No")
        << endl;
-  cout << "  SQLite:     " 
-       << (ConfigSource::isBackendAvailable("sqlite") ? "Yes" : "No") 
+  cout << "  SQLite:     "
+       << (ConfigSource::isBackendAvailable("sqlite")     ? "Yes" : "No")
        << endl;
-  cout << "  MySQL:      " 
-       << (ConfigSource::isBackendAvailable("mysql") ? "Yes" : "No") 
+  cout << "  MySQL:      "
+       << (ConfigSource::isBackendAvailable("mysql")      ? "Yes" : "No")
        << endl;
-  cout << "  PostgreSQL: " 
-       << (ConfigSource::isBackendAvailable("postgresql") ? "Yes" : "No") 
+  cout << "  PostgreSQL: "
+       << (ConfigSource::isBackendAvailable("postgresql") ? "Yes" : "No")
        << endl << endl;
 } /* showAvailableBackends */
 
-void demonstrateDbConfigInit(void)
-{
-  cout << "Demonstrating automatic backend initialization using db.conf..." << endl;
-  
-  // This will fail gracefully since no db.conf exists in standard locations
-  // and no svxlink.conf exists either, but it shows the process
-  cout << "Attempting to initialize configuration (this may fail in demo environment):" << endl;
-  
-  try 
-  {
-    Config cfg;
-    // This would normally read db.conf and initialize the backend
-    // In a real application, this would either succeed or call exit(1)
-    cout << "Note: In a real application, cfg.open() would either succeed or abort the application" << endl;
-  }
-  catch (...)
-  {
-    cout << "Demo: Configuration initialization would handle errors and abort if needed" << endl;
-  }
-  
-  cout << endl;
-} /* demonstrateDbConfigInit */
 
-void createSampleDbConfig(const string& config_dir)
+void demonstrateBackend(Config& cfg)
 {
-  cout << "Creating sample db.conf in: " << config_dir << endl;
-  
-  // Create directory if it doesn't exist
-  string mkdir_cmd = "mkdir -p " + config_dir;
-  int result = system(mkdir_cmd.c_str());
-  if (result != 0)
-  {
-    cerr << "Warning: Failed to create directory: " << config_dir << endl;
-  }
-  
-  // Create a simple SQLite db.conf
-  string db_conf_path = config_dir + "/db.conf";
-  ofstream db_conf(db_conf_path);
-  if (db_conf.is_open())
-  {
-    db_conf << "# SVXLink Database Configuration - Demo\n";
-    db_conf << "[DATABASE]\n";
-    db_conf << "TYPE=sqlite\n";
-    db_conf << "SOURCE=" << config_dir << "/demo_config.db\n";
-    db_conf.close();
-    cout << "Created " << db_conf_path << endl;
-  }
-  
-  cout << endl;
-} /* createSampleDbConfig */
+  cout << "Backend type: " << cfg.getBackendType() << endl << endl;
 
-void demonstrateBackend(const string& config_dir)
-{
-  cout << "Demonstrating configuration backend with config directory: " << config_dir << endl;
-  
-  // Open configuration using db.conf
-  Config cfg;
-  if (!cfg.open(config_dir))
-  {
-    cout << "ERROR: Failed to open configuration" << endl;
-    return;
-  }
-  
-  cout << "Configuration opened successfully." << endl << endl;
-  
-  // List all sections
+  // Populate a few values so the demo is interesting even with a blank DB
+  cfg.setValue("GLOBAL",   "LOGICS",           "MyLogic");
+  cfg.setValue("MyLogic",  "TYPE",              "SimplexLogic");
+  cfg.setValue("MyLogic",  "RX",               "Rx1");
+  cfg.setValue("MyLogic",  "TX",               "Tx1");
+  cfg.setValue("Rx1",      "TYPE",             "Local");
+  cfg.setValue("Rx1",      "AUDIO_DEV",        "alsa:plughw:0");
+  cfg.setValue("Rx1",      "VOX_FILTER_DEPTH", "20");
+  cfg.setValue("Rx1",      "VOX_LIMIT",        "1000");
+
+  // List all sections and their tags
   cout << "Configuration sections:" << endl;
   list<string> sections = cfg.listSections();
   for (const string& section : sections)
   {
     cout << "  [" << section << "]" << endl;
-    
-    // List tags in this section
     list<string> tags = cfg.listSection(section);
     for (const string& tag : tags)
     {
-      string value = cfg.getValue(section, tag);
-      cout << "    " << tag << " = " << value << endl;
+      cout << "    " << tag << " = " << cfg.getValue(section, tag) << endl;
     }
     cout << endl;
   }
-  
-  // Demonstrate template getValue functions
-  cout << "Template getValue demonstrations:" << endl;
-  
-  // String value
+
+  // Typed getValue
+  cout << "Typed getValue demonstrations:" << endl;
+
   string logics;
   if (cfg.getValue("GLOBAL", "LOGICS", logics))
   {
     cout << "  GLOBAL/LOGICS = \"" << logics << "\"" << endl;
   }
-  
-  // Integer value
+
   int vox_depth = 0;
   if (cfg.getValue("Rx1", "VOX_FILTER_DEPTH", vox_depth))
   {
     cout << "  Rx1/VOX_FILTER_DEPTH = " << vox_depth << endl;
   }
-  
-  // Integer with range checking
+
   int vox_limit = 0;
   if (cfg.getValue("Rx1", "VOX_LIMIT", -30, 0, vox_limit))
   {
     cout << "  Rx1/VOX_LIMIT = " << vox_limit << " (range checked)" << endl;
   }
-  
-  // Missing value with default
+
   string missing_value;
   if (cfg.getValue("GLOBAL", "MISSING_VALUE", missing_value, true))
   {
-    cout << "  GLOBAL/MISSING_VALUE = \"" << missing_value << "\" (missing_ok=true)" << endl;
+    cout << "  GLOBAL/MISSING_VALUE = \""
+         << (missing_value.empty() ? "<not set>" : missing_value)
+         << "\" (missing_ok=true)" << endl;
   }
-  else
-  {
-    cout << "  GLOBAL/MISSING_VALUE not found (as expected)" << endl;
-  }
-  
+
   cout << endl;
-  
-  // Demonstrate value subscription
+
+  // Value subscription
   cout << "Demonstrating value subscription..." << endl;
-  
-  cfg.subscribeValue("GLOBAL", "LOGICS", string("DefaultLogic"), 
-                     [](const string& value) {
-                       cout << "  Subscription callback: GLOBAL/LOGICS changed to \"" 
-                            << value << "\"" << endl;
+
+  cfg.subscribeValue("GLOBAL", "LOGICS", string("DefaultLogic"),
+                     [](const string& val) {
+                       cout << "  Subscription callback: GLOBAL/LOGICS = \""
+                            << val << "\"" << endl;
                      });
-  
-  // Change the value to trigger subscription
-  cfg.setValue("GLOBAL", "LOGICS", "NewLogic");
-  
+
+  cfg.setValue("GLOBAL", "LOGICS", "ChangedLogic");
+
   cout << endl << "Demo completed successfully!" << endl;
 } /* demonstrateBackend */
 
