@@ -12,7 +12,7 @@ using namespace Async;
 int main(int argc, char **argv)
 {
   Config cfg;
-  if (!cfg.open("test.cfg"))
+  if (!cfg.openDirect("file://test.cfg"))
   {
     cerr << "*** Error: Could not open config file test.cfg\n";
     exit(1);

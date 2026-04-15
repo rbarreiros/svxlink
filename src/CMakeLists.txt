@@ -23,7 +23,9 @@
 ##############################################################################
 cmake_minimum_required(VERSION 3.7...3.30)
 project(svxlink C CXX)
-#enable_testing()
+if(BUILD_TESTS)
+  enable_testing()
+endif()
 
 # The path to the project global include directory
 set(PROJECT_INCLUDE_DIR ${PROJECT_BINARY_DIR}/include)
@@ -45,6 +47,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/Modules/")
 # Optional parts
 option(USE_QT "Build Qt applications and libs" ON)
 option(BUILD_STATIC_LIBS "Build static libraries in addition to dynamic" OFF)
+option(BUILD_TESTS "Build the test suite (requires Catch2)" OFF)
 
 # The sample rate used internally in SvxLink
 if(NOT DEFINED INTERNAL_SAMPLE_RATE)
@@ -337,6 +340,24 @@ add_subdirectory(svxlink)
 if(USE_QT)
   add_subdirectory(qtel)
 endif(USE_QT)
+
+# Tests — added AFTER all source subdirectories so that all library targets
+# (asynccore etc.) and their directory-level COMPILE_DEFINITIONS are already
+# known when the test CMakeLists files are processed.
+if(BUILD_TESTS)
+  find_package(Catch2 3 QUIET)
+  if(NOT Catch2_FOUND)
+    find_package(Catch2 QUIET)
+  endif()
+  if(NOT Catch2_FOUND)
+    message(FATAL_ERROR
+      "BUILD_TESTS=ON but Catch2 was not found.\n"
+      "Install Catch2 v2 or v3 (e.g. 'apt install catch2' / 'brew install catch2')\n"
+      "or set BUILD_TESTS=OFF to build without tests.")
+  endif()
+  message(STATUS "Catch2 found — building tests")
+  add_subdirectory(${CMAKE_SOURCE_DIR}/../tests ${CMAKE_BINARY_DIR}/tests)
+endif()
 
 # Experimental CPack package building
 set(CPACK_SET_DESTDIR "ON")
