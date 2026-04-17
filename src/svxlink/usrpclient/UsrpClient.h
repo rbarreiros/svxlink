@@ -181,6 +181,12 @@ class UsrpClient : public ReflectorClient
     std::array<int16_t, FRAME_SAMPLES * 4> m_tx_buf{};
     int                         m_tx_stored     = 0;
 
+    // -- Audio tuning ---------------------------------------------------------
+    float                       m_tx_preamp     = 1.0f; // linear gain for USRP→reflector audio
+    float                       m_rx_preamp     = 1.0f; // linear gain for reflector→USRP audio
+    bool                        m_usrp_audio_le = true;  // true=USRP sends LE audio (chan_usrp/ASL)
+                                                          // false=USRP sends BE audio (htons style)
+
     // -- State ----------------------------------------------------------------
     bool                        m_ptt_on        = false;  // we are sending to USRP
     bool                        m_usrp_ptt_on   = false;  // USRP is sending to us

@@ -23,10 +23,12 @@ the Free Software Foundation; either version 2 of the License, or
 
 #include <sys/time.h>
 #include <cstring>
+#include <cmath>
 #include <sstream>
 #include <iostream>
 #include <algorithm>
 #include <cassert>
+#include <vector>
 
 
 /****************************************************************************
@@ -140,6 +142,42 @@ bool UsrpClient::initialize(Async::Config& cfg, const std::string& section)
   std::string tmp;
   if (cfg.getValue(section, "DEFAULT_CC", tmp)) { m_cc = atoi(tmp.c_str()) & 0xff; }
   if (cfg.getValue(section, "DEFAULT_TS", tmp)) { m_ts = atoi(tmp.c_str()) & 0xff; }
+
+    // -- Audio tuning ---------------------------------------------------------
+    // USRP_TX_PREAMP: gain (dB) applied to audio coming FROM USRP before encoding
+    //                 to the reflector.  Positive = louder, negative = quieter.
+  {
+    double tx_preamp_db = 0.0;
+    cfg.getValue(section, "USRP_TX_PREAMP", tx_preamp_db);
+    m_tx_preamp = (tx_preamp_db == 0.0)
+                      ? 1.0f
+                      : static_cast<float>(pow(10.0, tx_preamp_db / 20.0));
+    if (tx_preamp_db != 0.0)
+      log(LOGINFO, "  USRP_TX_PREAMP=" + to_string(tx_preamp_db)
+          + " dB (linear=" + to_string(m_tx_preamp) + ")");
+  }
+    // USRP_RX_PREAMP: gain (dB) applied to audio going TO USRP after decoding
+    //                 from the reflector.
+  {
+    double rx_preamp_db = 0.0;
+    cfg.getValue(section, "USRP_RX_PREAMP", rx_preamp_db);
+    m_rx_preamp = (rx_preamp_db == 0.0)
+                      ? 1.0f
+                      : static_cast<float>(pow(10.0, rx_preamp_db / 20.0));
+    if (rx_preamp_db != 0.0)
+      log(LOGINFO, "  USRP_RX_PREAMP=" + to_string(rx_preamp_db)
+          + " dB (linear=" + to_string(m_rx_preamp) + ")");
+  }
+    // USRP_AUDIO_LE: set to false if your USRP peer sends big-endian audio
+    //                samples (non-standard).  Default true = LE (chan_usrp/ASL).
+  {
+    bool le = true;
+    cfg.getValue(section, "USRP_AUDIO_LE", le);
+    m_usrp_audio_le = le;
+    log(LOGINFO, std::string("  USRP_AUDIO_LE=")
+        + (m_usrp_audio_le ? "true (little-endian PCM, chan_usrp/ASL default)"
+                           : "false (big-endian PCM)"));
+  }
 
     // -- USRP receive socket --------------------------------------------------
   m_usrp_sock = new UdpSocket(m_usrp_rx_port);
@@ -393,8 +431,10 @@ void UsrpClient::handleVoiceFrame(const void* audio_array, int /*count*/)
     return;
   }
 
+  const bool is_first_frame = !m_usrp_ptt_on;
+
     // PTT state tracking: log the start of a new transmission
-  if (!m_usrp_ptt_on)
+  if (is_first_frame)
   {
     m_usrp_ptt_on = true;
     log(LOGINFO, "[TX] PTT on — USRP → reflector TG " + to_string(m_default_tg));
@@ -409,18 +449,60 @@ void UsrpClient::handleVoiceFrame(const void* audio_array, int /*count*/)
   const auto* samples =
       reinterpret_cast<const array<int16_t, FRAME_SAMPLES>*>(audio_array);
 
-    // Convert big-endian network samples to host order
+    // The AsyncMsg Packer16 always applies be16toh() when unpacking, treating
+    // the wire as big-endian.  chan_usrp/ASL3 sends native little-endian PCM,
+    // so Packer16 produces byte-swapped values that must be corrected.
+    //
+    // If m_usrp_audio_le == true  (default, chan_usrp/ASL):
+    //   ntohs() undoes Packer16's be16toh() → original LE value restored ✓
+    // If m_usrp_audio_le == false (non-standard BE peer):
+    //   skip the second swap; Packer16's be16toh() already gives host order ✓
   array<int16_t, FRAME_SAMPLES> host_samples{};
+  float   peak = 0.0f, sum_sq = 0.0f;
+  int16_t diag[5]{};  // first 5 endian-corrected samples for diagnostics
   for (int i = 0; i < FRAME_SAMPLES; ++i)
   {
-    host_samples[i] = ntohs((*samples)[i]);
+    int16_t raw   = (*samples)[i];
+    int16_t fixed = m_usrp_audio_le ? static_cast<int16_t>(ntohs(raw)) : raw;
+
+    if (i < 5) diag[i] = fixed;
+
+      // Compute stats on pre-gain values (useful for level diagnostics)
+    float fval = static_cast<float>(fixed);
+    sum_sq += fval * fval;
+    float afval = fval < 0.0f ? -fval : fval;
+    if (afval > peak) peak = afval;
+
+      // Apply TX preamp (gain), convert to float, soft-clip, back to int16
+    float f = fval / 32768.0f * m_tx_preamp;
+    if      (f >  1.0f) f =  1.0f;
+    else if (f < -1.0f) f = -1.0f;
+    host_samples[i] = static_cast<int16_t>(f * 32767.0f);
+  }
+
+    // On the first frame of each transmission log a sample digest to help
+    // identify whether the audio data looks like valid speech PCM.
+    // peak / rms values are relative to 32768 (full-scale = 32768).
+  if (m_debug >= LOGINFO && is_first_frame)
+  {
+    float rms = sqrtf(sum_sq / FRAME_SAMPLES);
+    log(LOGINFO, "[TX] First frame digest:"
+        " peak=" + to_string(static_cast<int>(peak))
+        + " rms=" + to_string(static_cast<int>(rms))
+        + " (full-scale=32768)"
+        + " samples[0..4]="
+        + to_string(diag[0]) + "," + to_string(diag[1]) + ","
+        + to_string(diag[2]) + "," + to_string(diag[3]) + ","
+        + to_string(diag[4]));
   }
 
   log(LOGDEBUG, "[TX] Feeding " + to_string(FRAME_SAMPLES)
-      + " S16 samples (" + to_string(sizeof(int16_t) * FRAME_SAMPLES)
-      + " bytes) into S16 decoder");
+      + " S16 samples into pipeline"
+      + (m_tx_preamp != 1.0f
+           ? " (preamp=" + to_string(m_tx_preamp) + ")"
+           : ""));
 
-    // Feed S16 PCM @ 8 kHz into the S16 decoder (int16 → float @ 8 kHz).
+    // Feed int16 PCM @ 8 kHz into the S16 decoder (int16 → float @ 8 kHz).
     // The decoder's downstream chain (interpolator if needed, then the
     // negotiated codec encoder) handles rate conversion and encoding.
   m_s16_dec->writeEncodedSamples(host_samples.data(),
@@ -525,6 +607,21 @@ void UsrpClient::sendUsrpAudio(const void* pcm16le, int byte_count)
   log(LOGDEBUG, "[RX] " + to_string(n) + " S16 samples (" + to_string(byte_count)
       + " bytes) from decoder → USRP framing buffer (stored="
       + to_string(m_tx_stored) + ")");
+
+    // Apply RX preamp if configured — scale samples in-place into a local buffer
+  vector<int16_t> rx_buf;
+  if (m_rx_preamp != 1.0f)
+  {
+    rx_buf.resize(n);
+    for (int i = 0; i < n; ++i)
+    {
+      float f = static_cast<float>(in[i]) / 32768.0f * m_rx_preamp;
+      if      (f >  1.0f) f =  1.0f;
+      else if (f < -1.0f) f = -1.0f;
+      rx_buf[i] = static_cast<int16_t>(f * 32767.0f);
+    }
+    in = rx_buf.data();
+  }
 
     // Accumulate samples and emit 160-sample USRP frames
   int pos = 0;

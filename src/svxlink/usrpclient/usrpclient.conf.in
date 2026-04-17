@@ -106,34 +106,29 @@ DEFAULT_TG=9
 # Audio processing
 ###############################################################################
 
-# Preamp/gain (dB) applied to outgoing audio before the encoder.
-# Positive values increase level, negative values decrease it.
-#PREAMP=0
+# USRP_TX_PREAMP — gain (dB) applied to audio received FROM the USRP peer
+# (chan_usrp/AllStar) BEFORE it is encoded and forwarded to the reflector.
+# Use this to correct level differences between your ASL node and the reflector.
+#   Positive  → louder on the reflector  (e.g. +6 = double the amplitude)
+#   Negative  → quieter on the reflector (e.g. -6 = half the amplitude)
+# Default: 0 (no change).  Hint: run with --debug 2 to see peak/RMS diagnostics.
+#USRP_TX_PREAMP=0
 
-# Gain (dB) applied to incoming (network) audio after decoding.
-#NET_PREAMP=0
+# USRP_RX_PREAMP — gain (dB) applied to audio received FROM the reflector
+# AFTER decoding and BEFORE it is sent as USRP frames to the USRP peer.
+# Use this to correct the level heard on the USRP/ASL side.
+# Default: 0 (no change).
+#USRP_RX_PREAMP=0
+
+# USRP_AUDIO_LE — byte order of audio samples in USRP packets.
+#   true  = little-endian (native x86).  This is what chan_usrp / ASL3 sends.
+#   false = big-endian (network byte order).  Use if your peer sends htons() audio.
+# Default: true
+#USRP_AUDIO_LE=true
 
 # Jitter buffer size in milliseconds on the incoming (USRP→reflector) path.
 # Set to 0 to disable (default: 0).
 #JITTER_BUFFER_DELAY=0
-
-# Biquad IIR filter specification applied to audio going *to* the USRP.
-# Examples:
-#   BpBu1/600-3500   – 600 Hz to 3.5 kHz bandpass
-#FILTER_TO_USRP=
-
-# Biquad IIR filter specification applied to audio coming *from* the USRP.
-# Examples:
-#   HsBq2/0.01/-18/4000  – suppress frequencies above 4 kHz
-#FILTER_FROM_USRP=
-
-# Audio compressor threshold for the incoming (net→local) path.
-# Set to 0 to disable (default: -1.0 = enabled).
-#NET_LIMITER_THRESH=-1.0
-
-# Audio compressor threshold for the outgoing (local→net) path.
-# Set to 0 to disable (default: -1.0 = enabled).
-#LOCAL_LIMITER_THRESH=-1.0
 
 ###############################################################################
 # Debugging
