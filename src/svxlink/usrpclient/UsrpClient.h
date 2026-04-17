@@ -186,11 +186,10 @@ class UsrpClient : public ReflectorClient
     // -- Audio tuning ---------------------------------------------------------
     float                       m_tx_preamp     = 1.0f; // linear gain for USRP→reflector audio
     float                       m_rx_preamp     = 1.0f; // linear gain for reflector→USRP audio
-    // chan_usrp/ASL3 sends audio with htons() — big-endian on the wire.
-    // AsyncMsg Packer16 already applies be16toh() on unpack, so that is the
-    // correct host value with NO further conversion needed.
-    // Set to true ONLY for non-standard peers that send raw little-endian audio.
-    bool                        m_usrp_audio_le = false;
+    // After AsyncMsg unpack, apply ntohs() per sample (same as UsrpLogic).
+    // USRP_AUDIO_LE=false skips that swap for peers that send raw LE samples
+    // without htons (rare).
+    bool                        m_usrp_audio_le = true;
 
     // -- State ----------------------------------------------------------------
     bool                        m_ptt_on        = false;  // we are sending to USRP

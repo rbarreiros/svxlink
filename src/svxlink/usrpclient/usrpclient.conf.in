@@ -86,7 +86,8 @@ DEFAULT_TG=9
 # Talk groups the reflector should forward to this client when others transmit.
 # Space or comma separated (e.g. MONITOR_TGS=9 240).  Does not affect which TG
 # USRP audio is sent on — that is always DEFAULT_TG above.  If you also want
-# to hear others on your transmit TG, list that TG here as well.
+# to hear others on your transmit TG, list that TG here as well.  If DEFAULT_TG
+# is also listed here, the reflector may loop your own audio back (echo).
 #MONITOR_TGS=9 240
 
 ###############################################################################
@@ -123,13 +124,11 @@ DEFAULT_TG=9
 # Default: 0 (no change).
 #USRP_RX_PREAMP=0
 
-# USRP_AUDIO_LE — byte order of audio samples in USRP packets.
-#   false = big-endian (network/htons order).  chan_usrp / ASL3 sends audio with
-#           htons(), so AsyncMsg Packer16 already decodes it correctly.  Default.
-#   true  = little-endian (raw native x86, no htons).  Use only if your USRP peer
-#           sends raw PCM without any byte-swapping (unusual).
-# Default: false  (correct for chan_usrp / AllStarLink3)
-#USRP_AUDIO_LE=false
+# USRP_AUDIO_LE — whether to apply ntohs() to each sample after unpack.
+#   true  = default; matches contrib UsrpLogic (normal USRP / chan_usrp path).
+#   false = skip ntohs (only if your peer sends raw LE int16 with no htons).
+# Default: true
+#USRP_AUDIO_LE=true
 
 # Jitter buffer size in milliseconds on the incoming (USRP→reflector) path.
 # Set to 0 to disable (default: 0).

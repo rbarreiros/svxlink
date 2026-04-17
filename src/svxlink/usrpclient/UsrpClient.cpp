@@ -217,19 +217,17 @@ bool UsrpClient::initialize(Async::Config& cfg, const std::string& section)
       log(LOGINFO, "  USRP_RX_PREAMP=" + to_string(rx_preamp_db)
           + " dB (linear=" + to_string(m_rx_preamp) + ")");
   }
-    // USRP_AUDIO_LE: chan_usrp/ASL3 sends audio with htons() (big-endian wire).
-    //   false (default) = peer uses htons/BE → Packer16 already decoded it, no
-    //                     extra ntohs() needed in handleVoiceFrame.
-    //   true            = peer sends raw LE audio → apply ntohs() to undo
-    //                     Packer16's be16toh() and recover the original value.
+    // USRP_AUDIO_LE: default true matches contrib UsrpLogic (always ntohs after
+    // unpack).  Set false only if your USRP peer sends int16 PCM without
+    // htons and audio is wrong with the default.
   {
-    bool le = false;
+    bool le = true;
     cfg.getValue(section, "USRP_AUDIO_LE", le);
     m_usrp_audio_le = le;
     log(LOGINFO, std::string("  USRP_AUDIO_LE=")
         + (m_usrp_audio_le
-               ? "true  (peer sends raw LE audio — apply ntohs correction)"
-               : "false (peer sends htons/BE audio — chan_usrp/ASL3 default)"));
+               ? "true (apply ntohs — UsrpLogic / normal USRP default)"
+               : "false (raw samples after unpack, no ntohs)"));
   }
 
     // -- USRP receive socket --------------------------------------------------
@@ -505,17 +503,12 @@ void UsrpClient::handleVoiceFrame(const void* audio_array, int /*count*/)
   const auto* samples =
       reinterpret_cast<const array<int16_t, FRAME_SAMPLES>*>(audio_array);
 
-    // chan_usrp/ASL3 sends audio samples with htons() — big-endian on wire.
-    // AsyncMsg Packer16::unpack() also applies be16toh(), which correctly
-    // converts big-endian wire bytes → host int16.  No further swap needed.
-    //
-    // If m_usrp_audio_le == false (default, chan_usrp/ASL3 with htons audio):
-    //   Packer16 decoded BE wire → host value already ✓  (use raw directly)
-    // If m_usrp_audio_le == true  (raw LE peer, no htons):
-    //   Packer16 byte-swapped the LE value; apply ntohs() to undo it ✓
+    // Same convention as UsrpLogic::handleVoiceStream: after Msg unpack,
+    // int16 samples need ntohs() for correct host PCM (see UsrpLogic.cpp).
+    // USRP_AUDIO_LE=false skips ntohs for non-standard LE-only peers.
   array<int16_t, FRAME_SAMPLES> host_samples{};
   float   peak = 0.0f, sum_sq = 0.0f;
-  int16_t diag[5]{};  // first 5 endian-corrected samples for diagnostics
+  int16_t diag[5]{};  // first 5 samples after endian handling (for diagnostics)
   for (int i = 0; i < FRAME_SAMPLES; ++i)
   {
     int16_t raw   = (*samples)[i];
