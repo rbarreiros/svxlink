@@ -166,6 +166,11 @@ class ReflectorClient : public sigc::trackable
     uint32_t           currentAudioTg(void) const { return m_current_audio_tg; }
 
     /**
+     * @brief   Talk groups sent to the reflector via MsgTgMonitor (RX path)
+     */
+    const std::set<uint32_t>& monitoredTgs(void) const { return m_monitor_tgs; }
+
+    /**
      * @brief   Return the list of locally supported codec names
      *
      * The default implementation returns all codecs available in the linked

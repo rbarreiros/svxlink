@@ -29,6 +29,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include <algorithm>
 #include <cassert>
 #include <vector>
+#include <set>
 
 
 /****************************************************************************
@@ -139,6 +140,54 @@ bool UsrpClient::initialize(Async::Config& cfg, const std::string& section)
   cfg.getValue(section, "RPTID",      m_rptid);
   cfg.getValue(section, "DEFAULT_TG", m_default_tg);
 
+    // -- Reflector TG: select (TX) vs monitor (RX) ---------------------------
+    // DEFAULT_TG  → MsgSelectTG — only TG used when sending USRP audio up.
+    // MONITOR_TGS → MsgTgMonitor — TGs whose traffic the reflector forwards
+    //               to us when we are idle (incoming audio path).
+  {
+    vector<string> monitor_tokens;
+    if (!cfg.getValue(section, "MONITOR_TGS", monitor_tokens, true))
+    {
+      cerr << "*** ERROR[" << section
+           << "]: Illegal MONITOR_TGS (use space/comma-separated TG numbers)\n";
+      return false;
+    }
+    set<uint32_t> monitor_tgs;
+    for (const auto& tok : monitor_tokens)
+    {
+      if (tok.empty()) { continue; }
+      uint32_t tg = 0;
+      istringstream iss(tok);
+      iss >> tg;
+      if (iss.fail() || tg == 0)
+      {
+        cerr << "*** WARNING[" << section
+             << "]: Ignoring invalid MONITOR_TGS entry \"" << tok << "\"\n";
+        continue;
+      }
+      monitor_tgs.insert(tg);
+    }
+    monitorTgs(monitor_tgs);
+    selectTg(m_default_tg);
+
+    log(LOGINFO, "  DEFAULT_TG=" + to_string(m_default_tg)
+        + " (outgoing USRP→reflector)");
+    if (!monitor_tgs.empty())
+    {
+      string mon;
+      for (auto it = monitor_tgs.begin(); it != monitor_tgs.end(); ++it)
+      {
+        if (it != monitor_tgs.begin()) mon += ", ";
+        mon += to_string(*it);
+      }
+      log(LOGINFO, "  MONITOR_TGS=" + mon + " (incoming reflector→USRP)");
+    }
+    else
+    {
+      log(LOGINFO, "  MONITOR_TGS=(none — no extra TGs monitored)");
+    }
+  }
+
   std::string tmp;
   if (cfg.getValue(section, "DEFAULT_CC", tmp)) { m_cc = atoi(tmp.c_str()) & 0xff; }
   if (cfg.getValue(section, "DEFAULT_TS", tmp)) { m_ts = atoi(tmp.c_str()) & 0xff; }
@@ -168,15 +217,19 @@ bool UsrpClient::initialize(Async::Config& cfg, const std::string& section)
       log(LOGINFO, "  USRP_RX_PREAMP=" + to_string(rx_preamp_db)
           + " dB (linear=" + to_string(m_rx_preamp) + ")");
   }
-    // USRP_AUDIO_LE: set to false if your USRP peer sends big-endian audio
-    //                samples (non-standard).  Default true = LE (chan_usrp/ASL).
+    // USRP_AUDIO_LE: chan_usrp/ASL3 sends audio with htons() (big-endian wire).
+    //   false (default) = peer uses htons/BE → Packer16 already decoded it, no
+    //                     extra ntohs() needed in handleVoiceFrame.
+    //   true            = peer sends raw LE audio → apply ntohs() to undo
+    //                     Packer16's be16toh() and recover the original value.
   {
-    bool le = true;
+    bool le = false;
     cfg.getValue(section, "USRP_AUDIO_LE", le);
     m_usrp_audio_le = le;
     log(LOGINFO, std::string("  USRP_AUDIO_LE=")
-        + (m_usrp_audio_le ? "true (little-endian PCM, chan_usrp/ASL default)"
-                           : "false (big-endian PCM)"));
+        + (m_usrp_audio_le
+               ? "true  (peer sends raw LE audio — apply ntohs correction)"
+               : "false (peer sends htons/BE audio — chan_usrp/ASL3 default)"));
   }
 
     // -- USRP receive socket --------------------------------------------------
@@ -214,23 +267,26 @@ void UsrpClient::onDisconnected(void)
 
 void UsrpClient::onLoggedIn(void)
 {
-  log(LOGINFO, m_section + ": Logged in, codec=" + codec()
-      + " TG=" + to_string(m_default_tg));
+  string mon_log;
+  for (uint32_t tg : monitoredTgs())
+  {
+    if (!mon_log.empty()) mon_log += ", ";
+    mon_log += to_string(tg);
+  }
+  if (mon_log.empty()) mon_log = "(none)";
 
-  if (m_default_tg == 0)
+  log(LOGINFO, m_section + ": Logged in, codec=" + codec()
+      + " selected_TG=" + to_string(selectedTg())
+      + " monitor_TGs=" + mon_log);
+
+  if (selectedTg() == 0)
   {
     log(LOGWARN, m_section + ": WARNING: DEFAULT_TG is 0 — outgoing audio "
         "from USRP will not be routed anywhere on the reflector. "
         "Set DEFAULT_TG in the config.");
   }
 
-    // Select and/or monitor the default talk group
-  if (m_default_tg > 0)
-  {
-    selectTg(m_default_tg);
-  }
-
-    // Base class sends the monitored TG list
+    // MsgSelectTG + MsgTgMonitor were prepared in initialize(); base sends them.
   ReflectorClient::onLoggedIn();
 } /* UsrpClient::onLoggedIn */
 
@@ -425,9 +481,9 @@ void UsrpClient::handleVoiceFrame(const void* audio_array, int /*count*/)
     return;
   }
 
-  if (m_default_tg == 0)
+  if (selectedTg() == 0)
   {
-    log(LOGWARN, "[TX] Voice frame dropped — DEFAULT_TG is 0, no TG selected");
+    log(LOGWARN, "[TX] Voice frame dropped — no TG selected (DEFAULT_TG is 0)");
     return;
   }
 
@@ -437,7 +493,7 @@ void UsrpClient::handleVoiceFrame(const void* audio_array, int /*count*/)
   if (is_first_frame)
   {
     m_usrp_ptt_on = true;
-    log(LOGINFO, "[TX] PTT on — USRP → reflector TG " + to_string(m_default_tg));
+    log(LOGINFO, "[TX] PTT on — USRP → reflector TG " + to_string(selectedTg()));
     m_tx_watchdog.setEnable(true);
   }
   else
@@ -449,14 +505,14 @@ void UsrpClient::handleVoiceFrame(const void* audio_array, int /*count*/)
   const auto* samples =
       reinterpret_cast<const array<int16_t, FRAME_SAMPLES>*>(audio_array);
 
-    // The AsyncMsg Packer16 always applies be16toh() when unpacking, treating
-    // the wire as big-endian.  chan_usrp/ASL3 sends native little-endian PCM,
-    // so Packer16 produces byte-swapped values that must be corrected.
+    // chan_usrp/ASL3 sends audio samples with htons() — big-endian on wire.
+    // AsyncMsg Packer16::unpack() also applies be16toh(), which correctly
+    // converts big-endian wire bytes → host int16.  No further swap needed.
     //
-    // If m_usrp_audio_le == true  (default, chan_usrp/ASL):
-    //   ntohs() undoes Packer16's be16toh() → original LE value restored ✓
-    // If m_usrp_audio_le == false (non-standard BE peer):
-    //   skip the second swap; Packer16's be16toh() already gives host order ✓
+    // If m_usrp_audio_le == false (default, chan_usrp/ASL3 with htons audio):
+    //   Packer16 decoded BE wire → host value already ✓  (use raw directly)
+    // If m_usrp_audio_le == true  (raw LE peer, no htons):
+    //   Packer16 byte-swapped the LE value; apply ntohs() to undo it ✓
   array<int16_t, FRAME_SAMPLES> host_samples{};
   float   peak = 0.0f, sum_sq = 0.0f;
   int16_t diag[5]{};  // first 5 endian-corrected samples for diagnostics
@@ -554,7 +610,7 @@ void UsrpClient::txWatchdogExpired(Async::Timer* /*t*/)
 void UsrpClient::txEncoderOutput(const void* buf, int count)
 {
   log(LOGDEBUG, "[TX] Encoder produced " + to_string(count)
-      + " bytes → sending to reflector TG " + to_string(m_default_tg));
+      + " bytes → sending to reflector TG " + to_string(selectedTg()));
   ReflectorClient::sendEncodedAudio(buf, count);
 } /* UsrpClient::txEncoderOutput */
 
@@ -637,7 +693,7 @@ void UsrpClient::sendUsrpAudio(const void* pcm16le, int byte_count)
       UsrpAudioMsg amsg;
       amsg.setType(USRP_TYPE_VOICE);
       amsg.setKeyup(true);
-      amsg.setTg(m_default_tg);
+      amsg.setTg(selectedTg());
       amsg.setAudioData(m_tx_buf.data());
 
       if (m_udp_seq++ > 0x7fff) m_udp_seq = 0;
@@ -679,7 +735,7 @@ void UsrpClient::sendUsrpStop(void)
 void UsrpClient::sendUsrpMeta(const std::string& cs)
 {
   UsrpTlvMetaMsg meta;
-  meta.setTg(m_default_tg);
+  meta.setTg(selectedTg());
   meta.setRptId(m_rptid);
   meta.setCC(m_cc);
   meta.setTS(m_ts);

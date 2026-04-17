@@ -90,8 +90,9 @@ Configuration keys (in addition to all ReflectorClient keys):
   USRP_HOST        – USRP peer hostname/IP (required)
   USRP_TX_PORT     – UDP port to send audio to the USRP peer (default 41234)
   USRP_RX_PORT     – UDP port to receive audio from the USRP peer (default 41233)
-  DEFAULT_TG       – Talk group to select after login (default 0 = none)
-  MONITOR_TGS      – Space/comma-separated TG list to monitor
+  DEFAULT_TG       – Single TG selected for outgoing (USRP→reflector) audio
+  MONITOR_TGS      – Space/comma-separated TG list the reflector should forward
+                     when others transmit (incoming audio); not used for TX
   DMRID            – DMR ID sent in metadata frames (default 0)
   RPTID            – Repeater ID sent in metadata frames (default 0)
   DEFAULT_TS       – Default DMR time-slot (default 1)
@@ -164,6 +165,7 @@ class UsrpClient : public ReflectorClient
     uint8_t                     m_cc            = 1;
     uint8_t                     m_ts            = 1;
     uint32_t                    m_default_tg    = 0;
+    uint32_t                    m_monitor_tgs   = 0;  
 
     // -- Audio pipeline -------------------------------------------------------
     // RX (reflector → USRP):
@@ -184,8 +186,11 @@ class UsrpClient : public ReflectorClient
     // -- Audio tuning ---------------------------------------------------------
     float                       m_tx_preamp     = 1.0f; // linear gain for USRP→reflector audio
     float                       m_rx_preamp     = 1.0f; // linear gain for reflector→USRP audio
-    bool                        m_usrp_audio_le = true;  // true=USRP sends LE audio (chan_usrp/ASL)
-                                                          // false=USRP sends BE audio (htons style)
+    // chan_usrp/ASL3 sends audio with htons() — big-endian on the wire.
+    // AsyncMsg Packer16 already applies be16toh() on unpack, so that is the
+    // correct host value with NO further conversion needed.
+    // Set to true ONLY for non-standard peers that send raw little-endian audio.
+    bool                        m_usrp_audio_le = false;
 
     // -- State ----------------------------------------------------------------
     bool                        m_ptt_on        = false;  // we are sending to USRP
