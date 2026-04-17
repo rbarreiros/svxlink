@@ -119,6 +119,15 @@ class UsrpClient : public ReflectorClient
      */
     bool initialize(Async::Config& cfg, const std::string& section);
 
+    /**
+     * @brief   Override the debug verbosity set by the config file
+     * @param   level  0=errors 1=warn 2=info 3=debug
+     *
+     * Call after initialize() to let a CLI flag take precedence over the
+     * DEBUG config key.
+     */
+    void setDebugLevel(int level) { m_debug = level; }
+
   protected:
     // -- ReflectorClient overrides -------------------------------------------
 
@@ -157,12 +166,15 @@ class UsrpClient : public ReflectorClient
     uint32_t                    m_default_tg    = 0;
 
     // -- Audio pipeline -------------------------------------------------------
-    // Reflector → decoder → [resample] → fifo → [filter] → passthrough (out)
-    // Source → [filter] → [comp] → [resample] → encoder → Reflector
-    Async::AudioDecoder*        m_dec           = nullptr;
-    Async::AudioEncoder*        m_enc           = nullptr;
-    Async::AudioPassthrough*    m_audio_out     = nullptr;  // sink for decoded rx
-    Async::AudioPassthrough*    m_audio_in      = nullptr;  // source for tx audio
+    // RX (reflector → USRP):
+    //   m_dec (negotiated codec) → [AudioDecimator 16→8k] → s16_enc → sendUsrpAudio
+    // TX (USRP → reflector):
+    //   m_s16_dec (S16, int16→float@8k) → [AudioInterpolator 8→16k] → m_enc → reflector
+    Async::AudioDecoder*        m_dec           = nullptr;  // reflector codec decoder (RX)
+    Async::AudioEncoder*        m_enc           = nullptr;  // reflector codec encoder (TX)
+    Async::AudioDecoder*        m_s16_dec       = nullptr;  // S16 shim: USRP int16 → float (TX)
+    Async::AudioPassthrough*    m_audio_out     = nullptr;
+    Async::AudioPassthrough*    m_audio_in      = nullptr;
 
     // 16-bit sample accumulation buffer for USRP framing
     static constexpr int        FRAME_SAMPLES   = USRP_AUDIO_FRAME_LEN;
@@ -170,11 +182,13 @@ class UsrpClient : public ReflectorClient
     int                         m_tx_stored     = 0;
 
     // -- State ----------------------------------------------------------------
-    bool                        m_ptt_on        = false;
+    bool                        m_ptt_on        = false;  // we are sending to USRP
+    bool                        m_usrp_ptt_on   = false;  // USRP is sending to us
     bool                        m_meta_sent     = false;
     struct timeval              m_last_audio_ts{};
 
-    Async::Timer                m_flush_timer;
+    Async::Timer                m_flush_timer;      // RX watchdog (reflector→USRP)
+    Async::Timer                m_tx_watchdog;      // TX watchdog (USRP→reflector)
     int                         m_debug         = 0;
 
     // -- Helpers --------------------------------------------------------------
@@ -194,6 +208,15 @@ class UsrpClient : public ReflectorClient
 
     void flushTimeout(Async::Timer* t = nullptr);
     void allEncodedSamplesFlushed(void);
+
+    void txWatchdogExpired(Async::Timer* t = nullptr);
+
+    // Wrapper that logs and forwards encoded audio from the TX encoder to
+    // the reflector (connects to m_enc->writeEncodedSamples).
+    void txEncoderOutput(const void* buf, int count);
+
+    // Wrapper that logs and forwards the flush signal from the TX encoder.
+    void txEncoderFlushed(void);
 
     bool setupAudioPipeline(const std::string& codec);
 

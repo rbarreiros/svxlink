@@ -85,11 +85,14 @@ using namespace Async;
  ****************************************************************************/
 
 UsrpClient::UsrpClient(void)
-  : m_flush_timer(3000, Timer::TYPE_ONESHOT, false)
+  : m_flush_timer(3000, Timer::TYPE_ONESHOT, false),
+    m_tx_watchdog(5000, Timer::TYPE_ONESHOT, false)
 {
   timerclear(&m_last_audio_ts);
   m_flush_timer.expired.connect(
       sigc::mem_fun(*this, &UsrpClient::flushTimeout));
+  m_tx_watchdog.expired.connect(
+      sigc::mem_fun(*this, &UsrpClient::txWatchdogExpired));
 } /* UsrpClient::UsrpClient */
 
 
@@ -99,6 +102,11 @@ UsrpClient::~UsrpClient(void)
   m_usrp_sock = nullptr;
   delete m_dec;
   m_dec = nullptr;
+    // Delete m_s16_dec before m_enc: m_s16_dec's chain holds a non-owning ref
+    // to m_enc (the interpolator is owned by m_s16_dec), so disconnecting
+    // the source chain before deleting the encoder is safe.
+  delete m_s16_dec;
+  m_s16_dec = nullptr;
   delete m_enc;
   m_enc = nullptr;
 } /* UsrpClient::~UsrpClient */
@@ -170,6 +178,13 @@ void UsrpClient::onLoggedIn(void)
 {
   log(LOGINFO, m_section + ": Logged in, codec=" + codec()
       + " TG=" + to_string(m_default_tg));
+
+  if (m_default_tg == 0)
+  {
+    log(LOGWARN, m_section + ": WARNING: DEFAULT_TG is 0 — outgoing audio "
+        "from USRP will not be routed anywhere on the reflector. "
+        "Set DEFAULT_TG in the config.");
+  }
 
     // Select and/or monitor the default talk group
   if (m_default_tg > 0)
@@ -268,11 +283,12 @@ void UsrpClient::usrpDatagramReceived(const IpAddress& addr, uint16_t port,
 {
   if (count < USRP_HEADER_LEN)
   {
-    log(LOGWARN, "Short USRP datagram (" + to_string(count) + " bytes), ignored");
+    log(LOGWARN, "[USRP-RX] Short datagram (" + to_string(count)
+        + " bytes < " + to_string(USRP_HEADER_LEN) + "), ignored");
     return;
   }
 
-  log(LOGDEBUG, "USRP rx " + to_string(count) + " bytes from "
+  log(LOGDEBUG, "[USRP-RX] " + to_string(count) + " bytes from "
       + addr.toString() + ":" + to_string(port));
 
   stringstream ss;
@@ -281,16 +297,24 @@ void UsrpClient::usrpDatagramReceived(const IpAddress& addr, uint16_t port,
   UsrpHeaderMsg hdr;
   if (!hdr.unpack(ss))
   {
-    log(LOGERROR, "*** WARNING: Failed to unpack USRP header");
+    log(LOGERROR, "[USRP-RX] Failed to unpack USRP header");
     return;
   }
 
-  const uint32_t utype = hdr.type();
+  const uint32_t utype  = hdr.type();
+  const bool     keyup  = hdr.keyup();
+  const uint32_t seq    = hdr.seq();
+
+  log(LOGDEBUG, "[USRP-RX] type=" + to_string(utype)
+      + " keyup=" + (keyup ? "1" : "0")
+      + " seq=" + to_string(seq)
+      + " size=" + to_string(count));
 
   if (utype == USRP_TYPE_VOICE)
   {
-    if (!hdr.keyup())
+    if (!keyup)
     {
+      log(LOGINFO, "[USRP-RX] PTT off (keyup=0, seq=" + to_string(seq) + ")");
       handleStreamStop();
     }
     else
@@ -301,9 +325,12 @@ void UsrpClient::usrpDatagramReceived(const IpAddress& addr, uint16_t port,
       UsrpAudioMsg amsg;
       if (!amsg.unpack(sa))
       {
-        log(LOGERROR, "*** WARNING: Failed to unpack USRP audio frame");
+        log(LOGERROR, "[USRP-RX] Failed to unpack USRP audio frame");
         return;
       }
+      log(LOGDEBUG, "[USRP-RX] Voice frame seq=" + to_string(amsg.seq())
+          + " keyup=" + to_string(amsg.keyup())
+          + " payload=" + to_string(USRP_AUDIO_FRAME_LEN) + " samples");
       handleVoiceFrame(&amsg.audioData(), count);
     }
   }
@@ -322,19 +349,23 @@ void UsrpClient::usrpDatagramReceived(const IpAddress& addr, uint16_t port,
       UsrpTlvMetaMsg tlv;
       if (tlv.unpack(stlv))
       {
-        log(LOGINFO, "USRP meta: callsign=" + tlv.getCallsign()
+        log(LOGINFO, "[USRP-RX] TLV meta: callsign=" + tlv.getCallsign()
             + " tg=" + to_string(tlv.getTg())
             + " dmrid=" + to_string(tlv.getDmrId()));
       }
     }
+    else
+    {
+      log(LOGDEBUG, "[USRP-RX] TEXT frame (non-TLV), ignored");
+    }
   }
   else if (utype == USRP_TYPE_PING)
   {
-    log(LOGDEBUG, "USRP ping received");
+    log(LOGDEBUG, "[USRP-RX] PING received");
   }
   else
   {
-    log(LOGDEBUG, "USRP frame type " + to_string(utype) + " ignored");
+    log(LOGDEBUG, "[USRP-RX] Unknown frame type " + to_string(utype) + ", ignored");
   }
 } /* UsrpClient::usrpDatagramReceived */
 
@@ -342,6 +373,38 @@ void UsrpClient::usrpDatagramReceived(const IpAddress& addr, uint16_t port,
 void UsrpClient::handleVoiceFrame(const void* audio_array, int /*count*/)
 {
   gettimeofday(&m_last_audio_ts, nullptr);
+
+  if (m_s16_dec == nullptr)
+  {
+    log(LOGWARN, "[TX] Voice frame dropped — audio pipeline not ready yet "
+        "(codec not negotiated)");
+    return;
+  }
+
+  if (!isLoggedIn())
+  {
+    log(LOGWARN, "[TX] Voice frame dropped — not logged in to reflector");
+    return;
+  }
+
+  if (m_default_tg == 0)
+  {
+    log(LOGWARN, "[TX] Voice frame dropped — DEFAULT_TG is 0, no TG selected");
+    return;
+  }
+
+    // PTT state tracking: log the start of a new transmission
+  if (!m_usrp_ptt_on)
+  {
+    m_usrp_ptt_on = true;
+    log(LOGINFO, "[TX] PTT on — USRP → reflector TG " + to_string(m_default_tg));
+    m_tx_watchdog.setEnable(true);
+  }
+  else
+  {
+      // Restart the watchdog on every frame received
+    m_tx_watchdog.reset();
+  }
 
   const auto* samples =
       reinterpret_cast<const array<int16_t, FRAME_SAMPLES>*>(audio_array);
@@ -353,26 +416,72 @@ void UsrpClient::handleVoiceFrame(const void* audio_array, int /*count*/)
     host_samples[i] = ntohs((*samples)[i]);
   }
 
-    // Push S16 PCM @ 8 kHz into the encoder (which will produce encoded frames
-    // and call sendEncodedAudio() → ReflectorClient::sendEncodedAudio())
-  if (m_enc != nullptr)
-  {
-    m_enc->writeEncodedSamples(host_samples.data(),
-                               sizeof(int16_t) * FRAME_SAMPLES);
-  }
+  log(LOGDEBUG, "[TX] Feeding " + to_string(FRAME_SAMPLES)
+      + " S16 samples (" + to_string(sizeof(int16_t) * FRAME_SAMPLES)
+      + " bytes) into S16 decoder");
+
+    // Feed S16 PCM @ 8 kHz into the S16 decoder (int16 → float @ 8 kHz).
+    // The decoder's downstream chain (interpolator if needed, then the
+    // negotiated codec encoder) handles rate conversion and encoding.
+  m_s16_dec->writeEncodedSamples(host_samples.data(),
+                                 sizeof(int16_t) * FRAME_SAMPLES);
 } /* UsrpClient::handleVoiceFrame */
 
 
 void UsrpClient::handleStreamStop(void)
 {
-  log(LOGINFO, "USRP stream stop (PTT off)");
-  if (m_enc != nullptr)
+  m_tx_watchdog.setEnable(false);
+
+  if (!m_usrp_ptt_on)
   {
-    m_enc->flushEncodedSamples();
+    log(LOGDEBUG, "[TX] PTT-off received but was not transmitting, ignored");
+    return;
+  }
+
+  m_usrp_ptt_on = false;
+  log(LOGINFO, "[TX] PTT off — flushing TX chain to reflector");
+
+    // Flush the TX chain: m_s16_dec → [interp] → m_enc → reflector.
+    // flushEncodedSamples() on AudioDecoder propagates the flush signal
+    // downstream through the whole chain.
+  if (m_s16_dec != nullptr)
+  {
+    m_s16_dec->flushEncodedSamples();
   }
   m_meta_sent = false;
   timerclear(&m_last_audio_ts);
 } /* UsrpClient::handleStreamStop */
+
+
+void UsrpClient::txWatchdogExpired(Async::Timer* /*t*/)
+{
+  m_tx_watchdog.setEnable(false);
+  if (m_usrp_ptt_on)
+  {
+    log(LOGWARN, "[TX] Watchdog: no USRP frames for 5 s, forcing PTT off");
+    m_usrp_ptt_on = false;
+    if (m_s16_dec != nullptr)
+    {
+      m_s16_dec->flushEncodedSamples();
+    }
+    m_meta_sent = false;
+  }
+} /* UsrpClient::txWatchdogExpired */
+
+
+void UsrpClient::txEncoderOutput(const void* buf, int count)
+{
+  log(LOGDEBUG, "[TX] Encoder produced " + to_string(count)
+      + " bytes → sending to reflector TG " + to_string(m_default_tg));
+  ReflectorClient::sendEncodedAudio(buf, count);
+} /* UsrpClient::txEncoderOutput */
+
+
+void UsrpClient::txEncoderFlushed(void)
+{
+  log(LOGINFO, "[TX] Encoder flushed → sending MsgUdpFlushSamples to reflector");
+  ReflectorClient::flushEncodedAudio();
+} /* UsrpClient::txEncoderFlushed */
 
 
 /**
@@ -382,6 +491,7 @@ void UsrpClient::handleStreamStop(void)
  */
 void UsrpClient::allEncodedSamplesFlushed(void)
 {
+  log(LOGINFO, "[RX] Decoder chain fully flushed → sending USRP PTT-off");
   sendUsrpStop();
 } /* UsrpClient::allEncodedSamplesFlushed */
 
@@ -389,6 +499,7 @@ void UsrpClient::allEncodedSamplesFlushed(void)
 void UsrpClient::flushTimeout(Async::Timer* /*t*/)
 {
   m_flush_timer.setEnable(false);
+  log(LOGWARN, "[RX] Flush timeout — forcing allEncodedSamplesFlushed on encoder");
   if (m_enc != nullptr)
   {
     m_enc->allEncodedSamplesFlushed();
@@ -403,12 +514,17 @@ void UsrpClient::sendUsrpAudio(const void* pcm16le, int byte_count)
     // Announce ourselves on first frame with a TLV meta frame
   if (!m_meta_sent)
   {
+    log(LOGINFO, "[RX] Sending USRP TLV meta frame (callsign=" + callsign() + ")");
     sendUsrpMeta(callsign());
     m_meta_sent = true;
   }
 
   const int16_t* in = reinterpret_cast<const int16_t*>(pcm16le);
   const int      n  = byte_count / static_cast<int>(sizeof(int16_t));
+
+  log(LOGDEBUG, "[RX] " + to_string(n) + " S16 samples (" + to_string(byte_count)
+      + " bytes) from decoder → USRP framing buffer (stored="
+      + to_string(m_tx_stored) + ")");
 
     // Accumulate samples and emit 160-sample USRP frames
   int pos = 0;
@@ -433,6 +549,8 @@ void UsrpClient::sendUsrpAudio(const void* pcm16le, int byte_count)
       ostringstream ss;
       if (amsg.pack(ss))
       {
+        log(LOGDEBUG, "[RX] Sending USRP voice frame seq=" + to_string(m_udp_seq)
+            + " to " + m_usrp_host + ":" + to_string(m_usrp_tx_port));
         sendUdpRaw(ss);
       }
       m_tx_stored = 0;
@@ -450,15 +568,14 @@ void UsrpClient::sendUsrpStop(void)
   UsrpHeaderMsg hdr;
   if (m_udp_seq++ > 0x7fff) m_udp_seq = 0;
   hdr.setSeq(m_udp_seq);
-  
-    // keyup = 0, type = USRP_TYPE_VOICE (all zero defaults) → PTT-off
 
+    // keyup = 0, type = USRP_TYPE_VOICE (all zero defaults) → PTT-off
   ostringstream ss;
   if (hdr.pack(ss))
   {
     sendUdpRaw(ss);
+    log(LOGINFO, "[RX] USRP PTT-off frame sent (seq=" + to_string(m_udp_seq) + ")");
   }
-  log(LOGINFO, "USRP stop (PTT off) sent");
 } /* UsrpClient::sendUsrpStop */
 
 
@@ -495,11 +612,59 @@ void UsrpClient::sendUdpRaw(ostringstream& ss)
 bool UsrpClient::setupAudioPipeline(const std::string& negotiated_codec)
 {
     // -------------------------------------------------------------------------
-    // RX path:  Reflector encoded → decoder (S16@8k) → [upsample 8→16k]
-    //           → [filter] → [comp] → USRP UDP TX (via sendUsrpAudio)
+    // TX path (USRP → reflector):
+    //   USRP UDP delivers S16 PCM @ 8 kHz (via handleVoiceFrame)
+    //   → m_s16_dec  [S16 AudioDecoder: int16 @ 8 kHz → float @ 8 kHz]
+    //   → AudioInterpolator 2× (8 kHz → 16 kHz) if INTERNAL_SAMPLE_RATE==16000
+    //   → m_enc  [negotiated codec AudioEncoder → ReflectorClient::sendEncodedAudio]
     // -------------------------------------------------------------------------
 
-    // Delete old decoder if any
+  delete m_s16_dec;
+  m_s16_dec = nullptr;
+  delete m_enc;
+  m_enc = nullptr;
+
+  m_s16_dec = AudioDecoder::create("S16");
+  if (m_s16_dec == nullptr)
+  {
+    cerr << "*** ERROR[" << m_section << "]: Cannot create S16 decoder" << endl;
+    return false;
+  }
+
+  Async::AudioSource* tx_src = m_s16_dec;
+
+  if (INTERNAL_SAMPLE_RATE == 16000)
+  {
+    auto* interp = new AudioInterpolator(2, coeff_16_8, coeff_16_8_taps);
+    tx_src->registerSink(interp, true);
+    tx_src = interp;
+  }
+
+  m_enc = AudioEncoder::create(negotiated_codec);
+  if (m_enc == nullptr)
+  {
+    cerr << "*** ERROR[" << m_section
+         << "]: Cannot create encoder for codec: " << negotiated_codec << endl;
+    return false;
+  }
+    // Route through logging wrappers so every TX frame can be traced
+  m_enc->writeEncodedSamples.connect(
+      sigc::mem_fun(*this, &UsrpClient::txEncoderOutput));
+  m_enc->flushEncodedSamples.connect(
+      sigc::mem_fun(*this, &UsrpClient::txEncoderFlushed));
+
+    // m_enc is NOT owned by the chain; we manage it manually in the destructor.
+  tx_src->registerSink(m_enc, false);
+
+    // -------------------------------------------------------------------------
+    // RX path (reflector → USRP):
+    //   ReflectorClient::onAudioReceived → m_dec->writeEncodedSamples
+    //   → m_dec  [negotiated codec AudioDecoder: encoded → float @ INTERNAL_RATE]
+    //   → AudioDecimator 2× (16 kHz → 8 kHz) if INTERNAL_SAMPLE_RATE==16000
+    //   → s16_enc  [S16 AudioEncoder: float @ 8 kHz → int16 @ 8 kHz]
+    //   → sendUsrpAudio() → USRP UDP
+    // -------------------------------------------------------------------------
+
   delete m_dec;
   m_dec = nullptr;
 
@@ -510,110 +675,18 @@ bool UsrpClient::setupAudioPipeline(const std::string& negotiated_codec)
          << "]: Cannot create decoder for codec: " << negotiated_codec << endl;
     return false;
   }
-
-    // When the decoder fully drains, signal USRP TX end
   m_dec->allEncodedSamplesFlushed.connect(
       sigc::mem_fun(*this, &UsrpClient::allEncodedSamplesFlushed));
 
-    // The decoder produces S16 PCM @ 8 kHz.  If the internal rate is 16 kHz
-    // we need to interpolate.  We want the samples to come out of the
-    // pipeline into sendUsrpAudio(); wire up via a passthrough AudioSource
-    // that streams to a simple lambda-based sink.
+  Async::AudioSource* rx_src = m_dec;
 
-  // NOTE: Interpolation would normally happen here if INTERNAL_SAMPLE_RATE requires it,
-  // but since we wrap the Usrp transmission inside a direct connection on S16 sink,
-  // it is simpler to decode S16 straight into S16 encoder and emit frames.
-
-    // The final decoded PCM is forwarded to sendUsrpAudio() via the
-    // encoder's written-samples signal below — see TX path comments.
-    // For the RX path (reflector → USRP) we plug a custom PassthroughSink.
-
-  // NOTE: AudioPassthrough doesn't exist in this build as a bidirectional
-  // helper; instead we reuse m_audio_out as an AudioFifo that collects
-  // decoded samples and drains via writeSamples calls — but the simplest
-  // approach is to leave the decoder's downstream open and intercept via the
-  // encoder write path.  The architecture here mirrors UsrpLogic's approach:
-  //   m_dec output → (no local sink needed for usrp):
-  //   The S16 decoder writes raw PCM which we forward straight to the USRP.
-  //   We wire a custom AudioSink that calls sendUsrpAudio().
-  //
-  // AudioSink cannot be trivially subclassed inline; instead we use an
-  // AudioEncoder with codec "S16" (identity codec) to capture the samples.
-  //
-  // RX pipeline (reflector enc data → dec → enc_s16 → USRP packets):
-  //   We decode the reflector codec to PCM, then re-encode as S16 just to
-  //   get frame-sized callbacks.
-
-    // -------------------------------------------------------------------------
-    // TX path:  USRP UDP RX (S16@8k PCM from handleVoiceFrame)
-    //           → encoder (negotiated codec) → ReflectorClient::sendEncodedAudio
-    // -------------------------------------------------------------------------
-
-    // Delete old encoder
-  delete m_enc;
-  m_enc = nullptr;
-
-    // For the negotiated codec the encoder accepts S16 PCM input.
-    // However USRP always delivers raw S16 PCM, so we need an S16 encoder
-    // that wraps and feeds data into the actual codec encoder.
-    // Use "S16" as a passthrough encoder whose writtenSamples become the
-    // input to the real codec encoder.
-    //
-    // Simpler: just create the negotiated-codec encoder directly and push
-    // the S16 PCM bytes into it (writeEncodedSamples expects encoded bytes
-    // of *that* codec; for our purposes we call writeEncodedSamples with
-    // raw PCM that the codec then encodes).
-    //
-    // Actually: AudioEncoder::writeEncodedSamples is *output* signal.
-    // Input is AudioSink::writeSamples(float*, int).
-    // USRP delivers int16_t; we must convert to float and push via
-    // writeSamples on the encoder.
-    //
-    // RX (reflector → USRP):
-    //   ReflectorClient calls onAudioReceived(data, len) with encoded bytes.
-    //   We call m_dec->writeEncodedSamples(data, len).
-    //   Decoded float PCM flows downstream via sink chain.
-    //   We capture those float samples in a custom AudioSink wrapper that
-    //   converts back to S16 and calls sendUsrpAudio().
-
-    // For the TX direction (USRP → reflector):
-    //   USRP delivers S16 PCM via handleVoiceFrame → sendUsrpAudio path.
-    //   But wait — in this architecture "sendUsrpAudio" is for *outgoing* USRP
-    //   frames.  Let's name things correctly:
-    //
-    // CORRECT NAMING:
-    //   "USRP RX" = bytes arriving from USRP to us → encode → send to reflector
-    //   "USRP TX" = bytes we send to USRP          ← decode from reflector
-    //
-    // handleVoiceFrame() receives USRP→us S16 PCM and forwards to encoder.
-    // allEncodedSamplesFlushed / sendUsrpAudio / sendUsrpStop are for us→USRP.
-    //
-    // The encoder needs float input.  We convert in handleVoiceFrame and push
-    // via m_enc->writeSamples().
-
-    // Create the real reflector codec encoder (accepts float PCM @ 8 kHz)
-  m_enc = AudioEncoder::create(negotiated_codec);
-  if (m_enc == nullptr)
+  if (INTERNAL_SAMPLE_RATE == 16000)
   {
-    cerr << "*** ERROR[" << m_section
-         << "]: Cannot create encoder for codec: " << negotiated_codec << endl;
-    return false;
+    auto* decim = new AudioDecimator(2, coeff_16_8, coeff_16_8_taps);
+    rx_src->registerSink(decim, true);
+    rx_src = decim;
   }
 
-    // Encoder outputs → ReflectorClient::sendEncodedAudio
-  m_enc->writeEncodedSamples.connect(
-      sigc::mem_fun(*this, (void(UsrpClient::*)(const void*,int))
-                   &ReflectorClient::sendEncodedAudio));
-  m_enc->flushEncodedSamples.connect(
-      sigc::mem_fun(*this, &ReflectorClient::flushEncodedAudio));
-
-    // We need an S16→float shim for USRP PCM input to the encoder.
-    // This is handled inline in handleVoiceFrame() by converting int16 to
-    // float and calling m_enc->writeSamples() directly — no extra class needed.
-
-    // Decoder downstream for RX (reflector → USRP):
-    // We attach an S16 encoder as a "sink" to the decoder to capture
-    // float samples and convert back to int16 for USRP frames.
   AudioEncoder* s16_enc = AudioEncoder::create("S16");
   if (s16_enc == nullptr)
   {
@@ -625,9 +698,15 @@ bool UsrpClient::setupAudioPipeline(const std::string& negotiated_codec)
   s16_enc->flushEncodedSamples.connect(
       sigc::mem_fun(*this, &UsrpClient::sendUsrpStop));
 
-  m_dec->registerSink(s16_enc, true);
+    // s16_enc IS owned by the chain (deleted when rx_src is deleted)
+  rx_src->registerSink(s16_enc, true);
 
-  log(LOGINFO, m_section + ": Audio pipeline ready (codec=" + negotiated_codec + ")");
+  log(LOGINFO, m_section + ": Audio pipeline ready"
+      " codec=" + negotiated_codec
+      + " INTERNAL_SAMPLE_RATE=" + to_string(INTERNAL_SAMPLE_RATE)
+      + (INTERNAL_SAMPLE_RATE == 16000
+           ? " (interpolator 8→16k on TX, decimator 16→8k on RX)"
+           : " (no resampling needed)"));
   return true;
 } /* UsrpClient::setupAudioPipeline */
 

@@ -111,6 +111,7 @@ int main(int argc, const char* argv[])
   const char* section_name = "UsrpClient";
   int         pidfd        = -1;
   int         version_flag = 0;
+  int         debug_level  = -1;   // -1 means "not set on CLI, use config value"
 
   struct poptOption options[] = {
     { "config",    'c', POPT_ARG_STRING, &config_file,  0,
@@ -119,6 +120,8 @@ int main(int argc, const char* argv[])
       "Log to FILE instead of stdout", "FILE" },
     { "section",   's', POPT_ARG_STRING, &section_name, 0,
       "Config section name (default: UsrpClient)", "SECTION" },
+    { "debug",     'd', POPT_ARG_INT,    &debug_level,  0,
+      "Debug verbosity 0=errors 1=warn 2=info 3=debug (overrides config DEBUG)", "LEVEL" },
     { "user",       0,  POPT_ARG_STRING, &run_as_user,  0,
       "Drop privileges to USER", "USER" },
     { "group",      0,  POPT_ARG_STRING, &run_as_group, 0,
@@ -230,6 +233,12 @@ int main(int argc, const char* argv[])
   {
     cerr << "*** ERROR: UsrpClient initialization failed\n";
     return 1;
+  }
+
+    // CLI --debug overrides the DEBUG config key
+  if (debug_level >= 0)
+  {
+    client.setDebugLevel(debug_level);
   }
 
   cout << "UsrpClient started. Press Ctrl+C to exit.\n";
