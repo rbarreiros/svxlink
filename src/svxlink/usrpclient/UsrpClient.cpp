@@ -305,12 +305,21 @@ void UsrpClient::onCodecNegotiated(const std::string& negotiated_codec)
 void UsrpClient::onAudioReceived(uint32_t tg, const std::string& /*codec*/,
                                  const void* data, int len)
 {
+  if (m_usrp_ptt_on)
+  {
+    // Ignore internal loopback/echo from reflector while transmitting
+    return;
+  }
+
+  if (tg != m_default_tg)
+  {
     // Push encoded bytes from the reflector into our decoder pipeline.
     // The decoder expands to S16 @ 8 kHz, which gets interpolated to the
     // internal rate and forwarded to the USRP via sendUsrpAudio().
-  if (m_dec != nullptr)
-  {
-    m_dec->writeEncodedSamples(const_cast<void*>(data), len);
+    if (m_dec != nullptr)
+    {
+      m_dec->writeEncodedSamples(const_cast<void*>(data), len);
+    }
   }
 } /* UsrpClient::onAudioReceived */
 
@@ -336,6 +345,12 @@ void UsrpClient::onAllSamplesFlushed(void)
 
 void UsrpClient::onTalkerStart(uint32_t tg, const std::string& callsign)
 {
+  if (m_usrp_ptt_on)
+  {
+    // Ignore self-announcements from reflector loopback
+    return;
+  }
+
   log(LOGINFO, m_section + ": Talker start on TG #" + to_string(tg)
       + ": " + callsign);
 
@@ -346,8 +361,14 @@ void UsrpClient::onTalkerStart(uint32_t tg, const std::string& callsign)
 
 void UsrpClient::onTalkerStop(uint32_t tg, const std::string& callsign)
 {
+  if (m_usrp_ptt_on)
+  {
+    return;
+  }
+
   log(LOGINFO, m_section + ": Talker stop on TG #" + to_string(tg)
       + ": " + callsign);
+  sendUsrpMeta("");
 
     // Flush remaining buffered audio toward USRP
   if (m_dec != nullptr)
