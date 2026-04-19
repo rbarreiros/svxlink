@@ -313,15 +313,10 @@ void UsrpClient::onAudioReceived(uint32_t tg, const std::string& /*codec*/,
     if (tg == m_default_tg) return;
   }
 
-  if (tg != m_default_tg)
-  {
     // Push encoded bytes from the reflector into our decoder pipeline.
-    // The decoder expands to S16 @ 8 kHz, which gets interpolated to the
-    // internal rate and forwarded to the USRP via sendUsrpAudio().
-    if (m_dec != nullptr)
-    {
-      m_dec->writeEncodedSamples(const_cast<void*>(data), len);
-    }
+  if (m_dec != nullptr)
+  {
+    m_dec->writeEncodedSamples(const_cast<void*>(data), len);
   }
 } /* UsrpClient::onAudioReceived */
 
@@ -833,8 +828,7 @@ bool UsrpClient::setupAudioPipeline(const std::string& negotiated_codec)
     log(LOGERROR, "Could not create audio encoder: " + negotiated_codec);
     return false;
   }
-  log(LOGINFO, "TX Audio Encoder: " + negotiated_codec 
-      + " @ " + to_string(m_enc->sampleRate()) + "Hz");
+  log(LOGINFO, "TX Audio Encoder: " + negotiated_codec);
 
     // Route through logging wrappers so every TX frame can be traced
   m_enc->writeEncodedSamples.connect(
