@@ -40,6 +40,7 @@ the Free Software Foundation; either version 2 of the License, or
 
 #include <AsyncAudioInterpolator.h>
 #include <AsyncAudioDecimator.h>
+#include <AsyncAudioClipper.h>
 #include <version/SVXLINK.h>
 #include <config.h>
 
@@ -542,7 +543,8 @@ void UsrpClient::handleVoiceFrame(const void* audio_array, int /*count*/)
         + " samples[0..4]="
         + to_string(diag[0]) + "," + to_string(diag[1]) + ","
         + to_string(diag[2]) + "," + to_string(diag[3]) + ","
-        + to_string(diag[4]));
+        + to_string(diag[4]) + " (m_usrp_audio_le="
+        + (m_usrp_audio_le ? "true" : "false") + ")");
   }
 
   log(LOGDEBUG, "[TX] Feeding " + to_string(FRAME_SAMPLES)
@@ -784,6 +786,11 @@ bool UsrpClient::setupAudioPipeline(const std::string& negotiated_codec)
     auto* interp = new AudioInterpolator(2, coeff_16_8, coeff_16_8_taps);
     tx_src->registerSink(interp, true);
     tx_src = interp;
+
+      // Add a clipper after interpolation to handle overshoots
+    auto* clipper = new AudioClipper(1.0f);
+    tx_src->registerSink(clipper, true);
+    tx_src = clipper;
   }
 
   m_enc = AudioEncoder::create(negotiated_codec);
@@ -832,6 +839,11 @@ bool UsrpClient::setupAudioPipeline(const std::string& negotiated_codec)
     rx_src->registerSink(decim, true);
     rx_src = decim;
   }
+
+    // Add a clipper before encoding to S16 to prevent wrapping/distortion
+  auto* rx_clipper = new AudioClipper(1.0f);
+  rx_src->registerSink(rx_clipper, true);
+  rx_src = rx_clipper;
 
   AudioEncoder* s16_enc = AudioEncoder::create("S16");
   if (s16_enc == nullptr)
