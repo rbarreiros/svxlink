@@ -41,6 +41,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include <AsyncAudioInterpolator.h>
 #include <AsyncAudioDecimator.h>
 #include <AsyncAudioClipper.h>
+#include <AsyncAudioCompressor.h>
 #include <version/SVXLINK.h>
 #include <config.h>
 
@@ -816,7 +817,22 @@ bool UsrpClient::setupAudioPipeline(const std::string& negotiated_codec)
     tx_src->registerSink(interp, true);
     tx_src = interp;
 
-      // Add a clipper after interpolation to handle overshoots
+      // Add a limiter to smoothly control levels before hard clipping
+    float tx_limiter_thresh = -2.0f;
+    cfg().getValue(m_section, "USRP_TX_LIMITER_THRESH", tx_limiter_thresh);
+    if (tx_limiter_thresh != 0.0f)
+    {
+      auto* limiter = new AudioCompressor();
+      limiter->setThreshold(tx_limiter_thresh);
+      limiter->setRatio(0.1f);
+      limiter->setAttack(2);
+      limiter->setDecay(20);
+      limiter->setOutputGain(1.0f);
+      tx_src->registerSink(limiter, true);
+      tx_src = limiter;
+    }
+
+      // Add a clipper after interpolation/limiter to handle final peaks
     auto* clipper = new AudioClipper(1.0f);
     tx_src->registerSink(clipper, true);
     tx_src = clipper;
@@ -868,6 +884,21 @@ bool UsrpClient::setupAudioPipeline(const std::string& negotiated_codec)
     auto* decim = new AudioDecimator(2, coeff_16_8, coeff_16_8_taps);
     rx_src->registerSink(decim, true);
     rx_src = decim;
+  }
+
+    // Add a limiter to smoothly control levels before hard clipping
+  float rx_limiter_thresh = -2.0f;
+  cfg().getValue(m_section, "USRP_RX_LIMITER_THRESH", rx_limiter_thresh);
+  if (rx_limiter_thresh != 0.0f)
+  {
+    auto* rx_limiter = new AudioCompressor();
+    rx_limiter->setThreshold(rx_limiter_thresh);
+    rx_limiter->setRatio(0.1f);
+    rx_limiter->setAttack(2);
+    rx_limiter->setDecay(20);
+    rx_limiter->setOutputGain(1.0f);
+    rx_src->registerSink(rx_limiter, true);
+    rx_src = rx_limiter;
   }
 
     // Add a clipper before encoding to S16 to prevent wrapping/distortion
