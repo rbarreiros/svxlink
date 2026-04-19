@@ -396,7 +396,7 @@ void UsrpClient::usrpDatagramReceived(const IpAddress& addr, uint16_t port,
 
   const uint32_t utype  = hdr.type();
   const bool     keyup  = hdr.keyup();
-  const uint32_t seq    = hdr.seq();
+  const uint32_t seq    = hdr.seq(); // Now returns host-endian thanks to UsrpMsg.h fix
 
   log(LOGDEBUG, "[USRP-RX] type=" + to_string(utype)
       + " keyup=" + (keyup ? "1" : "0")
@@ -513,6 +513,7 @@ void UsrpClient::handleVoiceFrame(const void* audio_array, int /*count*/)
   for (int i = 0; i < FRAME_SAMPLES; ++i)
   {
     int16_t raw   = (*samples)[i];
+    // Reverting to original UsrpLogic behavior: le=true means apply ntohs.
     int16_t fixed = m_usrp_audio_le ? static_cast<int16_t>(ntohs(raw)) : raw;
 
     if (i < 5) diag[i] = fixed;
@@ -545,6 +546,13 @@ void UsrpClient::handleVoiceFrame(const void* audio_array, int /*count*/)
         + to_string(diag[2]) + "," + to_string(diag[3]) + ","
         + to_string(diag[4]) + " (m_usrp_audio_le="
         + (m_usrp_audio_le ? "true" : "false") + ")");
+  }
+
+  if (m_debug >= LOGDEBUG)
+  {
+      float rms = sqrtf(sum_sq / FRAME_SAMPLES);
+      log(LOGDEBUG, "[TX] Audio stats: peak=" + to_string(static_cast<int>(peak))
+          + " rms=" + to_string(static_cast<int>(rms)));
   }
 
   log(LOGDEBUG, "[TX] Feeding " + to_string(FRAME_SAMPLES)
@@ -673,6 +681,9 @@ void UsrpClient::sendUsrpAudio(const void* pcm16le, int byte_count)
     }
     in = rx_buf.data();
   }
+
+  // To maintain compatibility with Asterisk while fixing the path, 
+  // we now use the corrected host order and let AsyncMsg handle the pack.
 
     // Accumulate samples and emit 160-sample USRP frames
   int pos = 0;
