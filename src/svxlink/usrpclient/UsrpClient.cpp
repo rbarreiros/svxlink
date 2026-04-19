@@ -307,8 +307,10 @@ void UsrpClient::onAudioReceived(uint32_t tg, const std::string& /*codec*/,
 {
   if (m_usrp_ptt_on)
   {
-    // Ignore internal loopback/echo from reflector while transmitting
-    return;
+    // Only ignore if the TG matches our own. If someone else is talking
+    // on another TG while we talk on ours (unlikely but possible), 
+    // we might still want to hear them if the hardware supports it.
+    if (tg == m_default_tg) return;
   }
 
   if (tg != m_default_tg)
@@ -828,10 +830,12 @@ bool UsrpClient::setupAudioPipeline(const std::string& negotiated_codec)
   m_enc = AudioEncoder::create(negotiated_codec);
   if (m_enc == nullptr)
   {
-    cerr << "*** ERROR[" << m_section
-         << "]: Cannot create encoder for codec: " << negotiated_codec << endl;
+    log(LOGERROR, "Could not create audio encoder: " + negotiated_codec);
     return false;
   }
+  log(LOGINFO, "TX Audio Encoder: " + negotiated_codec 
+      + " @ " + to_string(m_enc->sampleRate()) + "Hz");
+
     // Route through logging wrappers so every TX frame can be traced
   m_enc->writeEncodedSamples.connect(
       sigc::mem_fun(*this, &UsrpClient::txEncoderOutput));
