@@ -396,54 +396,87 @@ bool Reflector::initialize(Async::Config &cfg)
 
 void Reflector::updateUserdata(Json::Value user_arr)
 {
-  User m_user;
+  if (!user_arr.isArray())
+  {
+    cerr << "*** ERROR[updateUserdata]: expected JSON array, got type "
+         << user_arr.type() << endl;
+    return;
+  }
+
   for (Json::Value::ArrayIndex i = 0; i != user_arr.size(); i++)
   {
-    Json::Value& t_userdata = user_arr[i];
-    m_user.id = t_userdata.get("id", "").asString();
-    m_user.name = t_userdata.get("name","").asString();
-    m_user.mode = t_userdata.get("mode","").asString();
-    m_user.call = t_userdata.get("call","").asString();
-    m_user.location = t_userdata.get("location","").asString();
-    m_user.aprs_sym = static_cast<char>(t_userdata.get("sym","").asInt());
-    m_user.aprs_tab = static_cast<char>(t_userdata.get("tab","").asInt());
-    m_user.comment = t_userdata.get("comment","").asString();
-    if (t_userdata.get("last_activity","").asUInt() > 0)
+    try
     {
-      m_user.last_activity = (time_t) t_userdata.get("last_activity","").asUInt();
-    }
-
-    std::map<std::string, User>::iterator iu;
-    iu = userdata.find(m_user.id);
-    if (iu != userdata.end())
-    {
-      iu->second.name= m_user.name;
-      iu->second.mode= m_user.mode;
-      iu->second.aprs_sym = m_user.aprs_sym;
-      iu->second.aprs_tab = m_user.aprs_tab;
-      iu->second.comment = m_user.comment;
-      iu->second.location = m_user.location;
-      if (m_user.last_activity)
+      Json::Value& t_userdata = user_arr[i];
+      if (!t_userdata.isObject())
       {
-        iu->second.last_activity = m_user.last_activity;
+        cerr << "*** WARNING[updateUserdata]: skipping non-object entry at index "
+             << i << endl;
+        continue;
       }
 
-      if (debug)
+      User m_user;
+      m_user.id       = t_userdata.get("id",       "").asString();
+      m_user.name     = t_userdata.get("name",      "").asString();
+      m_user.mode     = t_userdata.get("mode",      "").asString();
+      m_user.call     = t_userdata.get("call",      "").asString();
+      m_user.location = t_userdata.get("location",  "").asString();
+      m_user.comment  = t_userdata.get("comment",   "").asString();
+
+      const Json::Value& sym_val = t_userdata["sym"];
+      m_user.aprs_sym = sym_val.isIntegral()
+                        ? static_cast<char>(sym_val.asInt()) : '\0';
+
+      const Json::Value& tab_val = t_userdata["tab"];
+      m_user.aprs_tab = tab_val.isIntegral()
+                        ? static_cast<char>(tab_val.asInt()) : '\0';
+
+      const Json::Value& last_act = t_userdata["last_activity"];
+      if (last_act.isIntegral() && last_act.asUInt() > 0)
       {
-        cout << "UPDATE: call=" << m_user.call << ", id=" << m_user.id
-          << ", name=" << m_user.name << ", location=" << m_user.location 
-          << " (" << m_user.comment << ")" << endl;
+        m_user.last_activity = static_cast<time_t>(last_act.asUInt());
+      }
+
+      std::map<std::string, User>::iterator iu = userdata.find(m_user.id);
+      if (iu != userdata.end())
+      {
+        iu->second.name     = m_user.name;
+        iu->second.mode     = m_user.mode;
+        iu->second.aprs_sym = m_user.aprs_sym;
+        iu->second.aprs_tab = m_user.aprs_tab;
+        iu->second.comment  = m_user.comment;
+        iu->second.location = m_user.location;
+        if (m_user.last_activity)
+        {
+          iu->second.last_activity = m_user.last_activity;
+        }
+
+        if (debug)
+        {
+          cout << "UPDATE: call=" << m_user.call << ", id=" << m_user.id
+               << ", name=" << m_user.name << ", location=" << m_user.location
+               << " (" << m_user.comment << ")" << endl;
+        }
+      }
+      else
+      {
+        userdata.insert(std::pair<std::string, User>(m_user.id, m_user));
+        if (debug)
+        {
+          cout << "New user: call=" << m_user.call << ", id=" << m_user.id
+               << ", name=" << m_user.name << ", location=" << m_user.location
+               << " (" << m_user.comment << ")" << endl;
+        }
       }
     }
-    else
+    catch (const std::exception& e)
     {
-      userdata.insert(std::pair<std::string, User>(m_user.id, m_user));
-      if (debug)
-      {
-        cout << "New user: call=" << m_user.call << ", id=" << m_user.id 
-             << ", name=" << m_user.name << ", location=" << m_user.location 
-             << " ("   << m_user.comment << ")" << endl;
-      }
+      cerr << "*** ERROR[updateUserdata]: exception at entry " << i
+           << ": " << e.what() << endl;
+    }
+    catch (...)
+    {
+      cerr << "*** ERROR[updateUserdata]: unknown exception at entry " << i << endl;
     }
   }
   writeUserData(userdata);
