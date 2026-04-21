@@ -25,6 +25,10 @@ cmake_minimum_required(VERSION 3.7...3.30)
 project(svxlink C CXX)
 #enable_testing()
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)   # use -std=c++17, not -std=gnu++17
+
 # The path to the project global include directory
 set(PROJECT_INCLUDE_DIR ${PROJECT_BINARY_DIR}/include)
 
