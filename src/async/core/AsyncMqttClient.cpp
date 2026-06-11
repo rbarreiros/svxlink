@@ -303,20 +303,25 @@ void MqttClient::delivery_complete(mqtt::delivery_token_ptr token)
 
 void MqttClient::on_failure(const mqtt::token& tok)
 {
-   // Emit error signal for async operation failures
-   int msg_id = tok.get_message_id();
-   string err_msg = string("MQTT operation failed for message ID: ") + std::to_string(msg_id);
-   
+   string err_msg;
+   if (tok.get_type() == mqtt::token::Type::CONNECT)
+   {
+     err_msg = "MQTT connect failed";
+   }
+   else
+   {
+     int msg_id = tok.get_message_id();
+     err_msg = string("MQTT operation failed for message ID: ")
+             + std::to_string(msg_id);
+   }
+
    queueEvent([this, err_msg]() {
       this->error.emit(err_msg);
    });
 }
 
-void MqttClient::on_success(const mqtt::token& tok) 
+void MqttClient::on_success(const mqtt::token& tok)
 {
-    // on_success is called for connect, subscribe, publish (if async).
-    // For connection, we rely on the connected() callback which handles
-    // both initial connection and automatic reconnections.
 }
 
 } // namespace Async
