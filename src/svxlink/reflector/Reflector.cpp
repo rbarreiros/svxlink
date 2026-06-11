@@ -603,7 +603,12 @@ bool Reflector::initialize(Async::Config &cfg)
 #ifdef HAVE_MQTT
 void Reflector::onMqttReconnectTimer(Async::Timer* t)
 {
-  if (m_mqtt_client) 
+  // One-shot timers are removed from the event loop on expiry but
+  // m_is_enabled stays true until explicitly disabled. Without this,
+  // startMqttReconnect() would refuse to schedule further attempts.
+  m_mqtt_reconnect_timer.setEnable(false);
+
+  if (m_mqtt_client)
   {
      cout << "MQTT: Retrying connection..." << endl;
      m_mqtt_client->reconnect();
@@ -611,9 +616,9 @@ void Reflector::onMqttReconnectTimer(Async::Timer* t)
 }
 void Reflector::startMqttReconnect(void)
 {
-  if (m_mqtt_reconnect_timer.isEnabled()) 
+  if (m_mqtt_reconnect_timer.isEnabled())
   {
-      return; 
+      return;
   }
   
   if (m_mqtt_reconnect_delay_ms == 0) 
