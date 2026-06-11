@@ -1,0 +1,177 @@
+###############################################################################
+#
+# EchoClient configuration file
+#
+# Standalone bridge between an SvxReflector and the EchoLink network.
+# Behaves identically to the ModuleEchoLink plugin but runs as a standalone
+# process connected directly to an SvxReflector.
+#
+# Run: echoclient --config /etc/svxlink/echoclient.conf
+#
+###############################################################################
+
+[GLOBAL]
+# Optionally point to a directory from which additional .conf files are loaded
+#CFG_DIR=@SVX_SYSCONF_INSTALL_DIR@/echoclient.d
+
+[EchoClient]
+
+###############################################################################
+# Reflector connection settings (shared with ReflectorLogic)
+###############################################################################
+
+# Your station callsign as registered with the SvxReflector (required)
+CALLSIGN=MYCALL
+
+# Shared secret for HMAC-SHA1 authentication (legacy, pre-TLS protocol)
+#AUTH_KEY="Change this key now!"
+
+# One or more reflector hostnames (and optional :port), space-separated
+HOSTS=reflector.example.org
+
+# TCP/UDP port of the reflector (default: 5300)
+#HOST_PORT=5300
+
+# SRV DNS domain for automatic reflector discovery (alternative to HOSTS)
+#DNS_DOMAIN=example.com
+
+# UDP heartbeat interval in seconds (default: 15)
+#UDP_HEARTBEAT_INTERVAL=15
+
+# Enable verbose node join/leave messages (0 or 1)
+#VERBOSE=1
+
+###############################################################################
+# Certificate / PKI settings (same as ReflectorLogic)
+###############################################################################
+
+# Directory where PKI files (key, csr, crt, CA bundle) are stored
+#CERT_PKI_DIR=@SVX_LOCAL_STATE_DIR@/pki/echoclient
+
+# E-mail address(es) added to the client certificate SAN field
+#CERT_EMAIL=operator@example.com
+
+# Download CA bundle from server if missing or outdated (0 or 1, default: 1)
+#CERT_DOWNLOAD_CA_BUNDLE=1
+
+###############################################################################
+# Audio codec
+###############################################################################
+
+# Codec to negotiate with the reflector.
+# If not set, OPUS is preferred (recommended).
+# Valid values: OPUS, SPEEX, GSM, S16, RAW
+#CODEC=OPUS
+
+###############################################################################
+# Talk group settings
+###############################################################################
+
+# Default talk group to select after login (0 = none)
+DEFAULT_TG=9
+
+# Space/comma-separated list of TG IDs to monitor after login
+#MONITOR_TGS=9 240
+
+###############################################################################
+# EchoLink identity
+###############################################################################
+
+# EchoLink callsign (required) – typically CALLSIGN-L for a link node
+# or CALLSIGN-R for a repeater node
+EL_CALLSIGN=MYCALL-L
+
+# EchoLink directory password (required)
+EL_PASSWORD=MyPass
+
+# Station location string shown in the EchoLink directory (required)
+# Maximum 27 characters
+EL_LOCATION=[Svx] Fq, MyTown
+
+# Operator / sysop name (required)
+EL_SYSOPNAME=My Name
+
+# Description text sent to connecting stations (required)
+EL_DESCRIPTION=You have connected to a SvxLink EchoClient node.\n\nCheck out http://svxlink.sf.net/ for more info\n\nQTH:     My_QTH\nQRG:     Simplex link on ???.??? MHz\n
+
+# EchoLink directory server(s), space-separated (default: servers.echolink.org)
+#EL_SERVERS=servers.echolink.org
+#
+# If logs show registration OK but you do not see your own -L node in a local
+# station list, that is common: the bulk list often omits yourself. Check the
+# Links tab on https://www.echolink.org/ or from another ham's EchoLink client.
+
+###############################################################################
+# EchoLink connection control
+###############################################################################
+
+# Maximum simultaneous EchoLink connections (default: 1)
+MAX_CONNECTIONS=1
+
+# Maximum simultaneous active QSOs (default: 1)
+# MAX_QSOS must be <= MAX_CONNECTIONS
+MAX_QSOS=1
+
+# Drop all incoming EchoLink connections without processing (0 or 1)
+#DROP_ALL_INCOMING=0
+
+# Silently drop callsigns matching this regex (default: none)
+#DROP_INCOMING=^()$
+
+# Reject with message callsigns matching this regex (default: none)
+#REJECT_INCOMING=^()$
+
+# Only accept callsigns matching this regex (default: all)
+#ACCEPT_INCOMING=^(.*)$
+
+# Reject outgoing connections to callsigns matching this regex (default: none)
+#REJECT_OUTGOING=^()$
+
+# Only allow outgoing connections to callsigns matching this regex (default: all)
+#ACCEPT_OUTGOING=^(.*)$
+
+# Reject incoming conference node connections (0 or 1, default: 0)
+#REJECT_CONF=0
+
+# Allow connections from this IP subnet to bypass directory validation
+#ALLOW_IP=192.168.1.0/24
+
+# Rate-limit repeated incoming connection attempts:
+#   max_connects, remember_secs, block_minutes
+#   e.g. block after 3 connects in 300 seconds; blocked for 120 minutes
+#CHECK_NR_CONNECTS=3,300,120
+
+###############################################################################
+# Auto-connect
+###############################################################################
+
+# EchoLink node ID to automatically connect to on startup (0 = disabled)
+#AUTOCON_ECHOLINK_ID=9999
+
+# Interval in seconds between auto-connect attempts (minimum 5, default: 180)
+#AUTOCON_TIME=180
+
+###############################################################################
+# EchoLink proxy (optional)
+###############################################################################
+
+# Use an EchoLink proxy server if your firewall blocks the EchoLink ports
+#EL_PROXY_SERVER=the.proxy.server
+#EL_PROXY_PORT=8100
+#EL_PROXY_PASSWORD=PUBLIC
+
+###############################################################################
+# Network interface binding (optional)
+###############################################################################
+
+# Bind EchoLink UDP sockets to a specific local IP address.
+# Useful on multi-homed systems or when using a VPN interface.
+#BIND_ADDR=10.20.30.40
+
+###############################################################################
+# Debugging
+###############################################################################
+
+# Extra verbosity: set to 3 for noisy debug.  Errors, warnings, and normal
+# INFO (reflector + EchoLink directory status, QSOs, etc.) always go to stdout.
+#DEBUG=0

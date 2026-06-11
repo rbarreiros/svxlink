@@ -1,0 +1,142 @@
+###############################################################################
+#
+# UsrpClient configuration file
+#
+# Standalone bridge between an SvxReflector and a USRP endpoint.
+#
+# Run: usrpclient --config /etc/svxlink/usrpclient.conf
+#
+###############################################################################
+
+[GLOBAL]
+# Optionally point to a directory from which additional .conf files are loaded
+#CFG_DIR=@SVX_SYSCONF_INSTALL_DIR@/usrpclient.d
+
+[UsrpClient]
+
+###############################################################################
+# Reflector connection settings
+###############################################################################
+
+# Your station callsign (required)
+CALLSIGN=MYCALL
+
+# Shared secret for HMAC-SHA1 authentication (legacy, pre-TLS protocol)
+#AUTH_KEY="Change this key now!"
+
+# One or more reflector hostnames (and optional :port), space-separated.
+HOSTS=reflector.example.org
+
+# TCP/UDP port of the reflector (default: 5300)
+#HOST_PORT=5300
+
+# SRV DNS domain for automatic reflector discovery (alternative to HOSTS)
+#DNS_DOMAIN=example.com
+
+# UDP heartbeat interval in seconds (default: 15)
+#UDP_HEARTBEAT_INTERVAL=15
+
+# Enable verbose node join/leave messages (0 or 1)
+#VERBOSE=1
+
+###############################################################################
+# Certificate / PKI settings
+###############################################################################
+
+# Directory where PKI files (key, csr, crt, CA bundle) are stored
+#CERT_PKI_DIR=@SVX_LOCAL_STATE_DIR@/pki/usrpclient
+
+# E-mail address(es) added to the client certificate SAN field.
+#CERT_EMAIL=operator@example.com
+
+# Download CA bundle from server if missing or outdated (0 or 1, default: 1)
+#CERT_DOWNLOAD_CA_BUNDLE=1
+
+###############################################################################
+# Audio codec
+###############################################################################
+
+# Codec to negotiate with the reflector.
+# If not set, OPUS is preferred (recommended).  If OPUS is not supported by
+# the server, the best mutually supported codec is chosen automatically.
+# Valid values: OPUS, SPEEX, GSM, S16, RAW
+#CODEC=OPUS
+
+###############################################################################
+# USRP endpoint settings
+###############################################################################
+
+# Hostname or IP address of the USRP peer (required)
+USRP_HOST=127.0.0.1
+
+# UDP port to send audio *to* the USRP peer
+USRP_TX_PORT=41234
+
+# UDP port to *receive* audio from the USRP peer
+USRP_RX_PORT=41233
+
+###############################################################################
+# Talk group settings
+###############################################################################
+
+# Talk group used when transmitting audio from USRP to the reflector (0 = none).
+# This is the only TG used for outgoing reflector traffic (MsgSelectTG).
+DEFAULT_TG=9
+
+# Talk groups the reflector should forward to this client when others transmit.
+# Space or comma separated (e.g. MONITOR_TGS=9 240).  Does not affect which TG
+# USRP audio is sent on — that is always DEFAULT_TG above.  If you also want
+# to hear others on your transmit TG, list that TG here as well.  If DEFAULT_TG
+# is also listed here, the reflector may loop your own audio back (echo).
+#MONITOR_TGS=9 240
+
+###############################################################################
+# DMR / Digital metadata
+###############################################################################
+
+# DMR ID to include in USRP metadata frames (optional, default 0)
+#DMRID=1234567
+
+# Repeater ID for USRP metadata (optional, default 0)
+#RPTID=1234567
+
+# Default DMR time-slot (1 or 2, default: 1)
+#DEFAULT_TS=1
+
+# Default DMR colour code (0-15, default: 1)
+#DEFAULT_CC=1
+
+###############################################################################
+# Audio processing
+###############################################################################
+
+# USRP_TX_PREAMP — gain (dB) applied to audio received FROM the USRP peer
+# (chan_usrp/AllStar) BEFORE it is encoded and forwarded to the reflector.
+# Use this to correct level differences between your ASL node and the reflector.
+#   Positive  → louder on the reflector  (e.g. +6 = double the amplitude)
+#   Negative  → quieter on the reflector (e.g. -6 = half the amplitude)
+# Default: 0 (no change).  Hint: run with --debug 2 to see peak/RMS diagnostics.
+#USRP_TX_PREAMP=0
+
+# USRP_RX_PREAMP — gain (dB) applied to audio received FROM the reflector
+# AFTER decoding and BEFORE it is sent as USRP frames to the USRP peer.
+# Use this to correct the level heard on the USRP/ASL side.
+# Default: 0 (no change).
+#USRP_RX_PREAMP=0
+
+# USRP_AUDIO_LE — whether to apply ntohs() to each sample after unpack.
+#   true  = default; matches contrib UsrpLogic (normal USRP / chan_usrp path).
+#   false = skip ntohs (only if your peer sends raw LE int16 with no htons).
+# Default: true
+#USRP_AUDIO_LE=true
+
+# Jitter buffer size in milliseconds on the incoming (USRP→reflector) path.
+# Set to 0 to disable (default: 0).
+#JITTER_BUFFER_DELAY=0
+
+###############################################################################
+# Debugging
+###############################################################################
+
+# Verbosity level: 0=errors only, 1=warnings, 2=info, 3=debug (default: 0)
+#DEBUG=0

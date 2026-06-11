@@ -1,0 +1,117 @@
+###############################################################################
+#
+# ParrotClient configuration file
+#
+# Standalone SvxReflector parrot: records incoming audio on a talk group and
+# replays it back after a configurable delay.  Transmissions longer than
+# MAX_DURATION milliseconds are truncated at that limit; only the recorded
+# portion (up to the limit) is replayed.
+#
+# Run: parrotclient --config /etc/svxlink/parrotclient.conf
+#
+###############################################################################
+
+[GLOBAL]
+# Optionally point to a directory from which additional .conf files are loaded
+#CFG_DIR=@SVX_SYSCONF_INSTALL_DIR@/parrotclient.d
+
+[ParrotClient]
+
+###############################################################################
+# Reflector connection settings (shared with ReflectorLogic)
+###############################################################################
+
+# Your station callsign as registered with the SvxReflector (required)
+CALLSIGN=MYCALL
+
+# Shared secret for HMAC-SHA1 authentication (legacy, pre-TLS protocol)
+#AUTH_KEY="Change this key now!"
+
+# One or more reflector hostnames (and optional :port), space-separated
+HOSTS=reflector.example.org
+
+# TCP/UDP port of the reflector (default: 5300)
+#HOST_PORT=5300
+
+# SRV DNS domain for automatic reflector discovery (alternative to HOSTS)
+#DNS_DOMAIN=example.com
+
+# UDP heartbeat interval in seconds (default: 15)
+#UDP_HEARTBEAT_INTERVAL=15
+
+# Enable verbose node join/leave messages (0 or 1)
+#VERBOSE=1
+
+###############################################################################
+# Certificate / PKI settings (same as ReflectorLogic)
+###############################################################################
+
+# Directory where PKI files (key, csr, crt, CA bundle) are stored
+#CERT_PKI_DIR=@SVX_LOCAL_STATE_DIR@/pki/parrotclient
+
+# E-mail address(es) added to the client certificate SAN field
+#CERT_EMAIL=operator@example.com
+
+# Download CA bundle from server if missing or outdated (0 or 1, default: 1)
+#CERT_DOWNLOAD_CA_BUNDLE=1
+
+###############################################################################
+# Audio codec
+###############################################################################
+
+# Codec to negotiate with the reflector.
+# The parrot stores and replays the encoded frames directly (no decode/re-encode),
+# so the codec choice only affects network bandwidth.
+# Valid values: OPUS, SPEEX, GSM, S16, RAW
+#CODEC=OPUS
+
+###############################################################################
+# Talk group
+###############################################################################
+
+# Talk group to listen on and replay back to (required, must be > 0)
+DEFAULT_TG=9
+
+# Additional TGs to monitor (space/comma-separated list, optional)
+# The parrot only records and replays on DEFAULT_TG; MONITOR_TGS are
+# registered for monitoring only (e.g. so the reflector keeps the parrot
+# in the member list for those groups).
+#MONITOR_TGS=
+
+###############################################################################
+# Parrot behaviour
+###############################################################################
+
+# Delay in milliseconds between the end of the received transmission and the
+# start of the playback.  A small delay (e.g. 500–2000 ms) avoids the parrot
+# stepping on the tail of the original transmission.
+# Default: 1000 ms (1 second)
+REPLAY_DELAY=1000
+
+# Maximum recording duration in milliseconds.  If an incoming transmission
+# exceeds this length, frames beyond the limit are silently discarded.
+# The parrot will still replay everything that was recorded up to the limit.
+# Set to 0 to disable the limit (record indefinitely).
+# Default: 30000 ms (30 seconds)
+MAX_DURATION=30000
+
+# Duration of a single encoded audio frame in milliseconds.
+# This value controls how fast the parrot sends frames back to the reflector
+# during playback.  It should match the frame size produced by the negotiated
+# codec:
+#   OPUS    → typically 20 ms  (configurable, but 20 ms is standard)
+#   GSM     → 20 ms  (160 samples @ 8 kHz)
+#   SPEEX   → 20 ms  (narrowband mode, 160 samples @ 8 kHz)
+#   S16/RAW → 20 ms  (depends on encoder block size)
+# Setting this too low causes the parrot to send faster than real-time;
+# setting it too high causes underruns on the receiving end.
+# Default: 20 ms
+#FRAME_DURATION=20
+
+###############################################################################
+# Debugging
+###############################################################################
+
+# Extra verbosity: set to 3 to print per-frame replay debug lines.  Errors,
+# warnings, and normal operational INFO (recording / replay) always go to stdout.
+#DEBUG=0
