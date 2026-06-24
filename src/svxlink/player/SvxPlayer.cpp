@@ -45,6 +45,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <numeric>
 #include <cassert>
 #include <vector>
+#include <cctype>
 
 
 /****************************************************************************
@@ -85,6 +86,59 @@ using namespace Async;
  * Local variables
  *
  ****************************************************************************/
+
+namespace {
+
+const char* getMorse(char c)
+{
+  switch (std::toupper(static_cast<unsigned char>(c)))
+  {
+    case 'A': return ".-";
+    case 'B': return "-...";
+    case 'C': return "-.-.";
+    case 'D': return "-..";
+    case 'E': return ".";
+    case 'F': return "..-.";
+    case 'G': return "--.";
+    case 'H': return "....";
+    case 'I': return "..";
+    case 'J': return ".---";
+    case 'K': return "-.-";
+    case 'L': return ".-..";
+    case 'M': return "--";
+    case 'N': return "-.";
+    case 'O': return "---";
+    case 'P': return ".--.";
+    case 'Q': return "--.-";
+    case 'R': return ".-.";
+    case 'S': return "...";
+    case 'T': return "-";
+    case 'U': return "..-";
+    case 'V': return "...-";
+    case 'W': return ".--";
+    case 'X': return "-..-";
+    case 'Y': return "-.--";
+    case 'Z': return "--..";
+    case '0': return "-----";
+    case '1': return ".----";
+    case '2': return "..---";
+    case '3': return "...--";
+    case '4': return "....-";
+    case '5': return ".....";
+    case '6': return "-....";
+    case '7': return "--...";
+    case '8': return "---..";
+    case '9': return "----.";
+    case '.': return ".-.-.-";
+    case ',': return "--..--";
+    case '?': return "..--..";
+    case '/': return "-..-.";
+    case '=': return "-...-";
+    default: return "";
+  }
+}
+
+} // namespace
 
 
 /****************************************************************************
@@ -136,6 +190,8 @@ bool SvxPlayer::initialize(Async::Config& cfg, const std::string& section)
   }
 
   cfg.getValue(m_name, "DEFAULT_TG", m_default_tg);
+  cfg.getValue(m_name, "CW_PREAMBLE_MS", m_cw_preamble_ms);
+  cfg.getValue(m_name, "CW_POSTAMBLE_MS", m_cw_postamble_ms);
 
   m_msg_handler = new MsgHandler(INTERNAL_SAMPLE_RATE);
   m_msg_handler->allMsgsWritten.connect(
@@ -193,6 +249,31 @@ void SvxPlayer::playFiles(const vector<string>& files, uint32_t tg,
     startNextPlayback();
   }
 } /* SvxPlayer::playFiles */
+
+
+void SvxPlayer::playCw(int wpm, int pitch, const string& msg, uint32_t tg)
+{
+  if (msg.empty())
+  {
+    return;
+  }
+  if (tg == 0)
+  {
+    tg = m_default_tg;
+  }
+  PlayRequest req;
+  req.cw_msg        = msg;
+  req.cw_wpm        = wpm;
+  req.cw_pitch      = pitch;
+  req.tg            = tg;
+  req.gap_before_ms = 0;
+  m_play_queue.push(req);
+
+  if (ReflectorClient::isLoggedIn() && !m_playing)
+  {
+    startNextPlayback();
+  }
+} /* SvxPlayer::playCw */
 
 
 void SvxPlayer::stop(void)
@@ -414,17 +495,93 @@ void SvxPlayer::startNextPlayback(void)
   uint32_t tg = (req.tg > 0) ? req.tg : m_default_tg;
   if (tg == 0)
   {
-    cerr << m_name << ": *** WARNING: No TG configured for playback of '"
-         << req.file << "'. Set DEFAULT_TG in config or specify TG in play"
-            " command." << endl;
+    cerr << m_name << ": *** WARNING: No TG configured for playback. "
+         << "Set DEFAULT_TG in config or specify TG in play command." << endl;
   }
   ReflectorClient::selectTg(tg);
 
-  cout << m_name << ": Playing '" << req.file
-       << "' on TG #" << tg << endl;
-
   m_playing = true;
-  m_msg_handler->playFile(req.file);
+
+  if (!req.cw_msg.empty())
+  {
+    cout << m_name << ": Playing CW '" << req.cw_msg
+         << "' on TG #" << tg << endl;
+
+    int wpm = (req.cw_wpm > 0) ? req.cw_wpm : 20;
+    int pitch = (req.cw_pitch > 0) ? req.cw_pitch : 800;
+
+    int short_len = 60000 / (50 * wpm);
+    int long_len = short_len * 3;
+    int char_spacing = short_len;
+    int letter_spacing = short_len * 3;
+    int word_spacing = short_len * 7;
+    int amp = 500; // 0.5 amplitude
+
+    m_msg_handler->begin();
+
+    if (m_cw_preamble_ms > 0)
+    {
+      m_msg_handler->playSilence(static_cast<int>(m_cw_preamble_ms));
+    }
+
+    bool first_letter = true;
+    bool last_was_space = false;
+
+    for (char c : req.cw_msg)
+    {
+      if (c == ' ')
+      {
+        last_was_space = true;
+        continue;
+      }
+
+      const char* morse = getMorse(c);
+      if (!morse || !*morse) continue;
+
+      if (!first_letter)
+      {
+        if (last_was_space) {
+          m_msg_handler->playSilence(word_spacing);
+        } else {
+          m_msg_handler->playSilence(letter_spacing);
+        }
+      }
+      first_letter = false;
+      last_was_space = false;
+
+      bool first_char = true;
+      for (const char* p = morse; *p; ++p)
+      {
+        if (!first_char)
+        {
+          m_msg_handler->playSilence(char_spacing);
+        }
+        first_char = false;
+
+        if (*p == '.')
+        {
+          m_msg_handler->playTone(pitch, amp, short_len);
+        }
+        else if (*p == '-')
+        {
+          m_msg_handler->playTone(pitch, amp, long_len);
+        }
+      }
+    }
+
+    if (m_cw_postamble_ms > 0)
+    {
+      m_msg_handler->playSilence(static_cast<int>(m_cw_postamble_ms));
+    }
+
+    m_msg_handler->end();
+  }
+  else
+  {
+    cout << m_name << ": Playing '" << req.file
+         << "' on TG #" << tg << endl;
+    m_msg_handler->playFile(req.file);
+  }
 } /* SvxPlayer::startNextPlayback */
 
 
@@ -552,6 +709,66 @@ void SvxPlayer::processCommand(const string& line)
       }
       playFiles(splitCSV(token3), tg, gap_s * 1000);
     }
+    return;
+  }
+
+  if (cmd == "CW")
+  {
+    string token1, token2, token3;
+    if (!(iss >> token1 >> token2 >> token3))
+    {
+      cerr << m_name << ": CW command missing arguments "
+           << "(expected: CW TG WPM PITCH MESSAGE)" << endl;
+      return;
+    }
+
+    uint32_t tg = 0;
+    int wpm = 0;
+    int pitch = 0;
+    try { tg = static_cast<uint32_t>(stoul(token1)); }
+    catch (const exception&)
+    {
+      cerr << m_name << ": Invalid TG in CW command: " << token1 << endl;
+      return;
+    }
+    try { wpm = stoi(token2); }
+    catch (const exception&)
+    {
+      cerr << m_name << ": Invalid WPM in CW command: " << token2 << endl;
+      return;
+    }
+    try { pitch = stoi(token3); }
+    catch (const exception&)
+    {
+      cerr << m_name << ": Invalid Pitch in CW command: " << token3 << endl;
+      return;
+    }
+
+    string msg;
+    getline(iss, msg);
+    size_t first_non_space = msg.find_first_not_of(" \t\r\n");
+    if (first_non_space != string::npos)
+    {
+      msg.erase(0, first_non_space);
+    }
+    else
+    {
+      msg.clear();
+    }
+
+    size_t last_non_space = msg.find_last_not_of(" \t\r\n");
+    if (last_non_space != string::npos)
+    {
+      msg.erase(last_non_space + 1);
+    }
+
+    if (msg.empty())
+    {
+      cerr << m_name << ": CW command missing message" << endl;
+      return;
+    }
+
+    playCw(wpm, pitch, msg, tg);
     return;
   }
 

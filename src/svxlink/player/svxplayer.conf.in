@@ -95,6 +95,14 @@ HOSTS=reflector.example.org
 # or PTY play command (0 = no default TG, must always be specified explicitly)
 DEFAULT_TG=999
 
+# Milliseconds of silence played before CW messages to allow remote squelch
+# to open before the first tone (0 to disable)
+#CW_PREAMBLE_MS=500
+
+# Milliseconds of silence played after CW messages to allow remote squelch
+# to stay open until the last tone finishes (0 to disable)
+#CW_POSTAMBLE_MS=500
+
 # Audio codec to use between svxplayer and the reflector.
 # If not set, OPUS is used by default (recommended). If OPUS is not supported
 # by the server, the best mutually supported codec is selected automatically.
@@ -108,6 +116,7 @@ DEFAULT_TG=999
 #   PLAY <tg> <file1>,<file2>,...         - Play multiple files back-to-back on <tg>
 #   PLAY <tg> <gap_s> <file1>,<file2>,... - Play multiple files with <gap_s> seconds
 #                                           of silence (PTT released) between each
+#   CW <tg> <wpm> <pitch> <message>       - Play CW on talk group <tg>
 #   STOP                                  - Abort current playback and clear queue
 #PTY=@SVX_LOCAL_STATE_DIR@/svxplayer
 

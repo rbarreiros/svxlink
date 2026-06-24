@@ -186,6 +186,8 @@ class UsrpClient : public ReflectorClient
     // -- Audio tuning ---------------------------------------------------------
     float                       m_tx_preamp     = 1.0f; // linear gain for USRP→reflector audio
     float                       m_rx_preamp     = 1.0f; // linear gain for reflector→USRP audio
+    float                       m_tx_limiter_thresh = -2.0f; // dBFS, 0 disables TX limiter
+    float                       m_rx_limiter_thresh = -2.0f; // dBFS, 0 disables RX limiter
     // After AsyncMsg unpack, apply ntohs() per sample (same as UsrpLogic).
     // USRP_AUDIO_LE=false skips that swap for peers that send raw LE samples
     // without htons (rare).

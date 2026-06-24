@@ -129,6 +129,15 @@ class SvxPlayer : public ReflectorClient
                    uint32_t tg = 0, uint32_t gap_ms = 0);
 
     /**
+     * @brief  Queue a CW message for playback
+     * @param  wpm     Words per minute
+     * @param  pitch   Pitch in Hz
+     * @param  msg     The message to play
+     * @param  tg      Talk group (0 = use DEFAULT_TG)
+     */
+    void playCw(int wpm, int pitch, const std::string& msg, uint32_t tg = 0);
+
+    /**
      * @brief  Abort current playback and clear the playback queue
      */
     void stop(void);
@@ -146,7 +155,10 @@ class SvxPlayer : public ReflectorClient
     struct PlayRequest
     {
       std::string file;
-      uint32_t    tg;
+      std::string cw_msg;
+      int         cw_wpm = 0;
+      int         cw_pitch = 0;
+      uint32_t    tg = 0;
       uint32_t    gap_before_ms = 0;
     };
 
@@ -184,6 +196,8 @@ class SvxPlayer : public ReflectorClient
     MsgHandler*                       m_msg_handler        = nullptr;
 
     uint32_t                          m_default_tg         = 0;
+    uint32_t                          m_cw_preamble_ms     = 500;
+    uint32_t                          m_cw_postamble_ms    = 500;
 
     std::queue<PlayRequest>           m_play_queue;
     bool                              m_playing            = false;

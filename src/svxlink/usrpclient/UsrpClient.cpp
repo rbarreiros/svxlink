@@ -219,6 +219,8 @@ bool UsrpClient::initialize(Async::Config& cfg, const std::string& section)
       log(LOGINFO, "  USRP_RX_PREAMP=" + to_string(rx_preamp_db)
           + " dB (linear=" + to_string(m_rx_preamp) + ")");
   }
+  cfg.getValue(section, "USRP_TX_LIMITER_THRESH", m_tx_limiter_thresh);
+  cfg.getValue(section, "USRP_RX_LIMITER_THRESH", m_rx_limiter_thresh);
     // USRP_AUDIO_LE: default true matches contrib UsrpLogic (always ntohs after
     // unpack).  Set false only if your USRP peer sends int16 PCM without
     // htons and audio is wrong with the default.
@@ -818,12 +820,10 @@ bool UsrpClient::setupAudioPipeline(const std::string& negotiated_codec)
     tx_src = interp;
 
       // Add a limiter to smoothly control levels before hard clipping
-    float tx_limiter_thresh = -2.0f;
-    cfg().getValue(m_section, "USRP_TX_LIMITER_THRESH", tx_limiter_thresh);
-    if (tx_limiter_thresh != 0.0f)
+    if (m_tx_limiter_thresh != 0.0f)
     {
       auto* limiter = new AudioCompressor();
-      limiter->setThreshold(tx_limiter_thresh);
+      limiter->setThreshold(m_tx_limiter_thresh);
       limiter->setRatio(0.1f);
       limiter->setAttack(2);
       limiter->setDecay(20);
@@ -887,12 +887,10 @@ bool UsrpClient::setupAudioPipeline(const std::string& negotiated_codec)
   }
 
     // Add a limiter to smoothly control levels before hard clipping
-  float rx_limiter_thresh = -2.0f;
-  cfg().getValue(m_section, "USRP_RX_LIMITER_THRESH", rx_limiter_thresh);
-  if (rx_limiter_thresh != 0.0f)
+  if (m_rx_limiter_thresh != 0.0f)
   {
     auto* rx_limiter = new AudioCompressor();
-    rx_limiter->setThreshold(rx_limiter_thresh);
+    rx_limiter->setThreshold(m_rx_limiter_thresh);
     rx_limiter->setRatio(0.1f);
     rx_limiter->setAttack(2);
     rx_limiter->setDecay(20);
