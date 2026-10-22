@@ -77,6 +77,20 @@ else (GPIOD_FOUND)
   )
 endif (GPIOD_FOUND)
 
+# Find RNNoise (optional noise suppression for the RX audio chain)
+find_package(Rnnoise)
+if (Rnnoise_FOUND)
+  set(LIBS ${LIBS} ${Rnnoise_LIBRARIES})
+  include_directories(${Rnnoise_INCLUDE_DIRS})
+  add_definitions(${Rnnoise_DEFINITIONS} -DHAS_RNNOISE_SUPPORT)
+  set(LIBSRC ${LIBSRC} RnnoiseFilter.cpp)
+else (Rnnoise_FOUND)
+  message(
+    "--   The RNNoise library is an optional dependency.\n"
+    "--   The RNNOISE=1 receiver option will be unavailable."
+  )
+endif (Rnnoise_FOUND)
+
 # Find jsoncpp library
 #find_package(jsoncpp REQUIRED)
 #get_target_property(JSONCPP_INC_PATH jsoncpp_lib INTERFACE_INCLUDE_DIRECTORIES)

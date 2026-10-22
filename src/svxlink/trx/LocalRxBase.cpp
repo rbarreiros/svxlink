@@ -57,6 +57,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <AsyncAudioAmp.h>
 #include <AsyncAudioPassthrough.h>
 #include <AsyncAudioDecimator.h>
+#include <AsyncAudioInterpolator.h>
 #include <AsyncAudioClipper.h>
 #include <AsyncAudioCompressor.h>
 #include <AsyncAudioFifo.h>
@@ -86,6 +87,9 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include "Emphasis.h"
 #include "LADSPAPluginLoader.h"
 
+#ifdef HAS_RNNOISE_SUPPORT
+#include "RnnoiseFilter.h"
+#endif
 
 /****************************************************************************
  *
@@ -580,6 +584,40 @@ bool LocalRxBase::initialize(void)
     sel5_dec->sequenceDetected.connect(
         mem_fun(*this, &LocalRxBase::sel5Detected));
     voiceband_splitter->addSink(sel5_dec, true);
+  }
+
+  // Optional RNNoise noise suppression. It is inserted here, after the
+  // squelch, tone, DTMF and Sel5 detectors have been given their own
+  // unprocessed copy of the audio, so that none of them are affected.
+  // RNNoise only works at 48kHz so the audio is up- and downsampled around it.
+  // Rui Barreiros - CT7BPM
+  bool rnnoise_enable = false;
+  cfg().getValue(name(), "RNNOISE", rnnoise_enable);
+  if (rnnoise_enable)
+  {
+#if defined(HAS_RNNOISE_SUPPORT) && (INTERNAL_SAMPLE_RATE == 16000)
+    RnnoiseFilter *rnnoise = new RnnoiseFilter;
+    if (!rnnoise->isValid())
+    {
+      cerr << "*** ERROR: Could not create RNNoise state for RX \""
+           << name() << "\"" << endl;
+      delete rnnoise;
+      return false;
+    }
+    AudioInterpolator *rn_up = new AudioInterpolator(3, coeff_48_16,
+                                                     coeff_48_16_taps);
+    AudioDecimator *rn_down = new AudioDecimator(3, coeff_48_16_wide,
+                                                 coeff_48_16_wide_taps);
+    prev_src->registerSink(rn_up, true);
+    rn_up->registerSink(rnnoise, true);
+    rnnoise->registerSink(rn_down, true);
+    prev_src = rn_down;
+#else
+    cerr << "*** ERROR: " << name() << "/RNNOISE=1 but SvxLink was built "
+         << "without RNNoise support (or INTERNAL_SAMPLE_RATE is not 16000)"
+         << endl;
+    return false;
+#endif
   }
 
     // Create an audio valve to use as squelch and connect it to the splitter
