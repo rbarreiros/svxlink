@@ -37,6 +37,21 @@ class RnnoiseFilter : public Async::AudioProcessor
      */
     float vadProbability(void) const { return m_vad_prob; }
 
+    /**
+     * @brief  Set the wet/dry mix
+     * @param  wet 0.0 = only original signal, 1.0 = only RNNoise output
+     */
+    void setMix(float wet)
+    {
+      m_mix = (wet < 0.0f) ? 0.0f : ((wet > 1.0f) ? 1.0f : wet);
+    }
+
+    /**
+     * @brief  Set output makeup gain
+     * @param  db Gain in dB applied after mixing
+     */
+    void setGain(float db);
+
   protected:
     virtual void processSamples(float *dest, const float *src, int count);
 
@@ -47,6 +62,8 @@ class RnnoiseFilter : public Async::AudioProcessor
     float               m_vad_prob;
     std::vector<float>  m_in_buf;
     std::vector<float>  m_out_buf;
+    float               m_mix;    // add
+    float               m_gain;   // add (linear)
 
     RnnoiseFilter(const RnnoiseFilter&);
     RnnoiseFilter& operator=(const RnnoiseFilter&);

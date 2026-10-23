@@ -604,6 +604,14 @@ bool LocalRxBase::initialize(void)
       delete rnnoise;
       return false;
     }
+
+    double rn_mix = 1.0;
+    double rn_gain_db = 0.0;
+    cfg().getValue(name(), "RNNOISE_MIX", rn_mix);
+    cfg().getValue(name(), "RNNOISE_GAIN", rn_gain_db);
+    rnnoise->setMix(rn_mix);
+    rnnoise->setGain(rn_gain_db);
+
     AudioInterpolator *rn_up = new AudioInterpolator(3, coeff_48_16,
                                                      coeff_48_16_taps);
     AudioDecimator *rn_down = new AudioDecimator(3, coeff_48_16_wide,
